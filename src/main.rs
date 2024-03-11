@@ -13,20 +13,24 @@ fn get_stream_ip(stream: &TcpStream) -> anyhow::Result<String> {
     Ok(ip)
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     println!("[redis] server started at 127.0.0.1:6379");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let ip = get_stream_ip(&stream)?;
-                println!("[redis] connection established with {ip}");
-                let mut redis = Redis::new(stream)?;
-                if let Err(err) = redis.run() {
-                    eprintln!("{}", err);
-                    println!("[redis] connection closed with {ip}");
-                }
+                tokio::spawn(async move {
+                    let ip = get_stream_ip(&stream)?;
+                    println!("[redis] connection established with {ip}");
+                    let mut redis = Redis::new(stream)?;
+                    if let Err(_) = redis.run() {
+                        println!("[redis] connection closed with {ip}");
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                });
             }
             Err(err) => {
                 eprintln!("[redis - error] unknown error occurred: {}", err);

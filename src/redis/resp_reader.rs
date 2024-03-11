@@ -5,11 +5,11 @@ use std::{
 
 use anyhow::Context;
 
-pub struct TcpStreamReader{
+pub struct RESPReader {
     reader: BufReader<TcpStream>,
 }
 
-impl TcpStreamReader {
+impl RESPReader {
     pub fn new(stream: TcpStream) -> Self {
         Self {
             reader: BufReader::new(stream),
@@ -36,7 +36,7 @@ impl TcpStreamReader {
     }
 }
 
-impl Read for TcpStreamReader {
+impl Read for RESPReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.reader.read(buf)
     }

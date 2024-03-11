@@ -1,20 +1,22 @@
-use std::{io::Write, net::TcpStream};
+use std::io::Write;
+use std::net::TcpStream;
 
-use self::{tcp_stream_reader::TcpStreamReader, value::RedisValue};
+use self::{resp_reader::RESPReader, value::RedisValue};
 
-pub mod tcp_stream_reader;
+pub mod resp_reader;
 pub mod value;
 
 pub struct Redis {
-    reader: TcpStreamReader,
+    reader: RESPReader,
     writer: TcpStream,
 }
 
 impl Redis {
     pub fn new(client: TcpStream) -> anyhow::Result<Self> {
         let reader_client = client.try_clone()?;
+
         Ok(Self {
-            reader: TcpStreamReader::new(reader_client),
+            reader: RESPReader::new(reader_client),
             writer: client,
         })
     }

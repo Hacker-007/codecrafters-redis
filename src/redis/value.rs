@@ -1,6 +1,6 @@
 use std::{fmt::Display, io::Read};
 
-use super::tcp_stream_reader::TcpStreamReader;
+use super::resp_reader::RESPReader;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisValue {
@@ -34,7 +34,7 @@ impl Display for RedisValue {
 }
 
 impl RedisValue {
-    pub fn parse(reader: &mut TcpStreamReader) -> anyhow::Result<Self> {
+    pub fn parse(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let mut buf = [0];
         reader.read_exact(&mut buf)?;
         match buf[0] {
@@ -47,13 +47,13 @@ impl RedisValue {
         }
     }
 
-    fn parse_simple_string(reader: &mut TcpStreamReader) -> anyhow::Result<Self> {
+    fn parse_simple_string(reader: &mut RESPReader) -> anyhow::Result<Self> {
         reader
             .read_string()
             .map(|value| RedisValue::SimpleString(value))
     }
 
-    fn parse_bulk_string(reader: &mut TcpStreamReader) -> anyhow::Result<Self> {
+    fn parse_bulk_string(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let length = reader.read_usize()?;
         let mut data = Vec::new();
         data.resize(length, 0);
@@ -61,13 +61,15 @@ impl RedisValue {
         let mut buf = [0, 0];
         reader.read_exact(&mut buf)?;
         if buf != "\r\n".as_bytes() {
-            Err(anyhow::anyhow!("[redis-error] bulk string data is longer than length"))
+            Err(anyhow::anyhow!(
+                "[redis-error] bulk string data is longer than length"
+            ))
         } else {
             Ok(RedisValue::BulkString(data))
         }
     }
 
-    fn parse_array(reader: &mut TcpStreamReader) -> anyhow::Result<Self> {
+    fn parse_array(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let num_elements = reader.read_usize()?;
         (0..num_elements)
             .map(|_| Self::parse(reader))
