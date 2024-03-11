@@ -1,26 +1,21 @@
-use std::{fmt::Display, io::Read};
+use std::{collections::VecDeque, fmt::Display, io::Read};
+
+use anyhow::Context;
 
 use super::resp_reader::RESPReader;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisValue {
     SimpleString(String),
-    BulkString(Vec<u8>),
-    Array(Vec<RedisValue>),
+    BulkString(String),
+    Array(VecDeque<RedisValue>),
 }
 
 impl Display for RedisValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RedisValue::SimpleString(value) => write!(f, "+{value}\r\n"),
-            RedisValue::BulkString(values) => {
-                write!(f, "${}\r\n", values.len())?;
-                for value in values {
-                    write!(f, "{}", *value)?;
-                }
-
-                Ok(())
-            }
+            RedisValue::BulkString(value) => write!(f, "${}\r\n{}\r\n", value.len(), value),
             RedisValue::Array(values) => {
                 write!(f, "*{}\r\n", values.len())?;
                 for value in values {
@@ -65,7 +60,10 @@ impl RedisValue {
                 "[redis-error] bulk string data is longer than length"
             ))
         } else {
-            Ok(RedisValue::BulkString(data))
+            let s = String::from_utf8(data)
+                .context("[redis - error] value is not a valid unsigned number")?;
+
+            Ok(RedisValue::BulkString(s))
         }
     }
 
@@ -73,7 +71,7 @@ impl RedisValue {
         let num_elements = reader.read_usize()?;
         (0..num_elements)
             .map(|_| Self::parse(reader))
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<VecDeque<_>, _>>()
             .map(|values| RedisValue::Array(values))
     }
 }
