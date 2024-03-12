@@ -71,7 +71,7 @@ impl RedisValue {
         reader.read_exact(&mut buf)?;
         if buf != "\r\n".as_bytes() {
             Err(anyhow::anyhow!(
-                "[redis-error] bulk string data is longer than length"
+                "[redis - error] bulk string data is longer than length"
             ))
         } else {
             let s = String::from_utf8(data)

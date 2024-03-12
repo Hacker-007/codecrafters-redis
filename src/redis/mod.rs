@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
 
-use self::commands::{echo, ping, get, set, RedisCommand};
+use self::commands::{echo, get, ping, set, RedisCommand};
 use self::{resp_reader::RESPReader, value::RedisValue};
 
 mod commands;
@@ -40,7 +40,7 @@ impl Redis {
 
                 write!(self.writer, "{}", result)?;
             } else {
-                println!("[redis-error] expected a command encoded as an array of binary strings")
+                println!("[redis - error] expected a command encoded as an array of binary strings")
             }
         }
     }

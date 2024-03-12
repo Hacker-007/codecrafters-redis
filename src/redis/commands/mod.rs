@@ -21,7 +21,7 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
     fn try_from(values: VecDeque<RedisValue>) -> Result<Self, Self::Error> {
         anyhow::ensure!(
             values.len() >= 1,
-            "[redis-error] client input must be a non-empty array"
+            "[redis - error] client input must be a non-empty array"
         );
 
         let mut values = values
@@ -37,7 +37,7 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                     Ok(RedisCommand::Echo { echo })
                 } else {
                     Err(anyhow::anyhow!(
-                        "[redis-error] command 'echo' requires one argument"
+                        "[redis - error] command 'echo' requires one argument"
                     ))
                 }
             }
@@ -46,23 +46,23 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                     Ok(RedisCommand::Get { key })
                 } else {
                     Err(anyhow::anyhow!(
-                        "[redis-error] command 'get' requires one argument"
+                        "[redis - error] command 'get' requires one argument"
                     ))
                 }
             }
             "set" => {
                 if let Some(key) = values.pop_front() {
                     if let Some(value) = values.pop_front() {
-                        return Ok(RedisCommand::Set { key, value });
+                        return Ok(RedisCommand::Set { key, value })
                     }
                 }
 
                 Err(anyhow::anyhow!(
-                    "[redis-error] command 'set' requires two arguments"
+                    "[redis - error] command 'set' requires two arguments"
                 ))
             }
             command => Err(anyhow::anyhow!(
-                "[redis-error] unknown command '{command}' received"
+                "[redis - error] unknown command '{command}' received"
             )),
         }
     }
