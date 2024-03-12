@@ -1,13 +1,8 @@
-use std::{collections::VecDeque, io::Write};
+use std::io::Write;
 
 use crate::redis::value::RedisValue;
 
-pub fn process(_: VecDeque<String>, writer: &mut impl Write) -> anyhow::Result<()> {
-    write!(
-        writer,
-        "{}",
-        RedisValue::SimpleString("PONG".to_string())
-    )?;
-
+pub fn process(writer: &mut impl Write) -> anyhow::Result<()> {
+    write!(writer, "{}", RedisValue::SimpleString("PONG".to_string()))?;
     Ok(())
 }

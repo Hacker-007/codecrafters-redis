@@ -29,6 +29,14 @@ impl Display for RedisValue {
 }
 
 impl RedisValue {
+    pub fn to_bulk_string(self) -> Option<String> {
+        if let Self::BulkString(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
     pub fn parse(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let mut buf = [0];
         reader.read_exact(&mut buf)?;
