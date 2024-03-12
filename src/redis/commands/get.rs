@@ -7,7 +7,7 @@ pub fn process(key: String, redis: &mut Redis) -> anyhow::Result<RedisValue> {
         Some(StoreValue {
             expiration: Some(expiration),
             ..
-        }) if *expiration >= SystemTime::now() => {
+        }) if *expiration <= SystemTime::now() => {
             redis.store.remove(&key);
             Ok(RedisValue::NullBulkString)
         }
