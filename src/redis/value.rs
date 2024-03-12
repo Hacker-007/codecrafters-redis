@@ -8,6 +8,7 @@ use super::resp_reader::RESPReader;
 pub enum RedisValue {
     SimpleString(String),
     BulkString(String),
+    NullBulkString,
     Array(VecDeque<RedisValue>),
 }
 
@@ -16,6 +17,7 @@ impl Display for RedisValue {
         match self {
             RedisValue::SimpleString(value) => write!(f, "+{value}\r\n"),
             RedisValue::BulkString(value) => write!(f, "${}\r\n{}\r\n", value.len(), value),
+            RedisValue::NullBulkString => write!(f, "$-1\r\n"),
             RedisValue::Array(values) => {
                 write!(f, "*{}\r\n", values.len())?;
                 for value in values {
@@ -57,9 +59,13 @@ impl RedisValue {
     }
 
     fn parse_bulk_string(reader: &mut RESPReader) -> anyhow::Result<Self> {
-        let length = reader.read_usize()?;
+        let length = reader.read_i32()?;
+        if length == -1 {
+            return Ok(RedisValue::NullBulkString)
+        }
+
         let mut data = Vec::new();
-        data.resize(length, 0);
+        data.resize(length as usize, 0);
         reader.read_exact(&mut data)?;
         let mut buf = [0, 0];
         reader.read_exact(&mut buf)?;

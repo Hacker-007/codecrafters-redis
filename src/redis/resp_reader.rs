@@ -34,6 +34,12 @@ impl RESPReader {
         s.parse()
             .context("[redis - error] value is not a valid unsigned number")
     }
+
+    pub fn read_i32(&mut self) -> anyhow::Result<i32> {
+        let s = self.read_string()?;
+        s.parse()
+            .context("[redis - error] value is not a valid signed number")
+    }
 }
 
 impl Read for RESPReader {

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+use std::io::Write;
 use std::net::TcpStream;
 
-use self::commands::{echo, ping, RedisCommand};
+use self::commands::{echo, ping, get, set, RedisCommand};
 use self::{resp_reader::RESPReader, value::RedisValue};
 
 mod commands;
@@ -10,6 +12,7 @@ pub mod value;
 pub struct Redis {
     reader: RESPReader,
     writer: TcpStream,
+    store: HashMap<String, String>,
 }
 
 impl Redis {
@@ -19,6 +22,7 @@ impl Redis {
         Ok(Self {
             reader: RESPReader::new(reader_client),
             writer: client,
+            store: HashMap::new(),
         })
     }
 
@@ -27,10 +31,14 @@ impl Redis {
             let value = RedisValue::parse(&mut self.reader)?;
             if let RedisValue::Array(values) = value {
                 let command: RedisCommand = values.try_into()?;
-                match command {
-                    RedisCommand::Ping => ping::process(&mut self.writer)?,
-                    RedisCommand::Echo { echo } => echo::process(echo, &mut self.writer)?,
-                }
+                let result = match command {
+                    RedisCommand::Ping => ping::process()?,
+                    RedisCommand::Echo { echo } => echo::process(echo)?,
+                    RedisCommand::Get { key } => get::process(key, self)?,
+                    RedisCommand::Set { key, value } => set::process(key, value, self)?,
+                };
+
+                write!(self.writer, "{}", result)?;
             } else {
                 println!("[redis-error] expected a command encoded as an array of binary strings")
             }

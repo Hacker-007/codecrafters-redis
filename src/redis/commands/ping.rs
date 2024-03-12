@@ -1,8 +1,5 @@
-use std::io::Write;
-
 use crate::redis::value::RedisValue;
 
-pub fn process(writer: &mut impl Write) -> anyhow::Result<()> {
-    write!(writer, "{}", RedisValue::SimpleString("PONG".to_string()))?;
-    Ok(())
+pub fn process() -> anyhow::Result<RedisValue> {
+    Ok(RedisValue::SimpleString("PONG".to_string()))
 }
