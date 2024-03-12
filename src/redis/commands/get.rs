@@ -1,9 +1,17 @@
-use crate::redis::{value::RedisValue, Redis};
+use std::time::SystemTime;
+
+use crate::redis::{value::RedisValue, Redis, StoreValue};
 
 pub fn process(key: String, redis: &mut Redis) -> anyhow::Result<RedisValue> {
-    if let Some(value) = redis.store.get(&key) {
-        Ok(RedisValue::BulkString(value.clone()))
-    } else {
-        Ok(RedisValue::NullBulkString)
+    match redis.store.get(&key) {
+        Some(StoreValue {
+            expiration: Some(expiration),
+            ..
+        }) if *expiration >= SystemTime::now() => {
+            redis.store.remove(&key);
+            Ok(RedisValue::NullBulkString)
+        }
+        Some(StoreValue { value, .. }) => Ok(RedisValue::BulkString(value.clone())),
+        _ => Ok(RedisValue::NullBulkString),
     }
 }

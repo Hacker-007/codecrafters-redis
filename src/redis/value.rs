@@ -31,14 +31,6 @@ impl Display for RedisValue {
 }
 
 impl RedisValue {
-    pub fn to_bulk_string(self) -> Option<String> {
-        if let Self::BulkString(s) = self {
-            Some(s)
-        } else {
-            None
-        }
-    }
-
     pub fn parse(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let mut buf = [0];
         reader.read_exact(&mut buf)?;
@@ -53,15 +45,13 @@ impl RedisValue {
     }
 
     fn parse_simple_string(reader: &mut RESPReader) -> anyhow::Result<Self> {
-        reader
-            .read_string()
-            .map(|value| RedisValue::SimpleString(value))
+        reader.read_string().map(RedisValue::SimpleString)
     }
 
     fn parse_bulk_string(reader: &mut RESPReader) -> anyhow::Result<Self> {
         let length = reader.read_i32()?;
         if length == -1 {
-            return Ok(RedisValue::NullBulkString)
+            return Ok(RedisValue::NullBulkString);
         }
 
         let mut data = Vec::new();
@@ -86,6 +76,6 @@ impl RedisValue {
         (0..num_elements)
             .map(|_| Self::parse(reader))
             .collect::<Result<VecDeque<_>, _>>()
-            .map(|values| RedisValue::Array(values))
+            .map(RedisValue::Array)
     }
 }

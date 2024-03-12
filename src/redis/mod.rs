@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
+use std::time::SystemTime;
 
 use self::commands::{echo, get, ping, set, RedisCommand};
 use self::{resp_reader::RESPReader, value::RedisValue};
@@ -9,10 +10,16 @@ mod commands;
 pub mod resp_reader;
 pub mod value;
 
+type StoreKey = String;
+struct StoreValue {
+    pub(self) value: String,
+    pub(self) expiration: Option<SystemTime>,
+}
+
 pub struct Redis {
     reader: RESPReader,
     writer: TcpStream,
-    store: HashMap<String, String>,
+    store: HashMap<StoreKey, StoreValue>,
 }
 
 impl Redis {
@@ -35,7 +42,7 @@ impl Redis {
                     RedisCommand::Ping => ping::process()?,
                     RedisCommand::Echo { echo } => echo::process(echo)?,
                     RedisCommand::Get { key } => get::process(key, self)?,
-                    RedisCommand::Set { key, value } => set::process(key, value, self)?,
+                    RedisCommand::Set { key, value, px } => set::process(key, value, px, self)?,
                 };
 
                 write!(self.writer, "{}", result)?;

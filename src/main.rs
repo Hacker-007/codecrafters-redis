@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
                     let ip = get_stream_ip(&stream)?;
                     println!("[redis] connection established with {ip}");
                     let mut redis = Redis::new(stream)?;
-                    if let Err(_) = redis.run() {
+                    if redis.run().is_err() {
                         println!("[redis] connection closed with {ip}");
                     }
 
