@@ -15,9 +15,21 @@ fn get_stream_ip(stream: &TcpStream) -> anyhow::Result<String> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let mut args = std::env::args();
+    args.next();
+    let port = match args.next() {
+        Some(ref arg_name) if arg_name == "--port" => args
+            .next()
+            .expect("[redis - error] value expected for port")
+            .parse::<u64>()
+            .expect("[redis - error] expected port value to be a positive number"),
+        _ => 6379,
+    };
 
-    println!("[redis] server started at 127.0.0.1:6379");
+    let url = format!("127.0.0.1:{port}");
+    let listener = TcpListener::bind(&url).unwrap();
+    
+    println!("[redis] server started at {url}");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
