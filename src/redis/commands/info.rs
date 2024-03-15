@@ -1,15 +1,32 @@
+use std::{io::Write, net::TcpStream};
+
 use crate::redis::{value::RedisValue, Redis, RedisMode};
 
 use super::InfoSection;
 
-pub fn process(section: InfoSection, redis: &Redis) -> anyhow::Result<RedisValue> {
+pub fn process(section: InfoSection, redis: &Redis, stream: &mut TcpStream) -> anyhow::Result<()> {
     if section == InfoSection::Replication {
-        let role = match redis.mode {
-            RedisMode::Master => "role:master".to_string(),
-            RedisMode::Slave { .. } => "role:slave".to_string(),
-        };
+        match &redis.mode {
+            RedisMode::Master {
+                replication_id,
+                replication_offset,
+            } => {
+                write!(
+                    stream,
+                    "{}{}{}",
+                    RedisValue::BulkString("role:master".to_string()),
+                    RedisValue::BulkString(format!("master_replid:{}", replication_id)),
+                    RedisValue::BulkString(format!("master_offset:{}", replication_offset))
+                )?;
+            }
+            RedisMode::Slave { .. } => write!(
+                stream,
+                "{}",
+                RedisValue::BulkString("role:slave".to_string())
+            )?,
+        }
 
-        return Ok(RedisValue::BulkString(role));
+        return Ok(());
     }
 
     Err(anyhow::anyhow!(

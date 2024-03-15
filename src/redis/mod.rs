@@ -1,9 +1,9 @@
 use std::collections::HashMap;
+use std::net::TcpStream;
 use std::sync::{Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use self::commands::{echo, get, info, ping, set, RedisCommand};
-use self::value::RedisValue;
 
 pub mod commands;
 pub mod resp_reader;
@@ -15,8 +15,12 @@ struct StoreValue {
     pub(self) expiration: Option<SystemTime>,
 }
 
+#[allow(dead_code)]
 enum RedisMode {
-    Master,
+    Master {
+        replication_id: String,
+        replication_offset: String,
+    },
     Slave {
         master_host: String,
         master_port: String,
@@ -36,21 +40,27 @@ impl Redis {
         }
     }
 
-    pub fn master() -> Self {
-        Self::new(RedisMode::Master)
+    pub fn master(replication_id: String, replication_offset: String) -> Self {
+        Self::new(RedisMode::Master {
+            replication_id,
+            replication_offset,
+        })
     }
 
     pub fn slave(master_host: String, master_port: String) -> Self {
-        Self::new(RedisMode::Slave { master_host, master_port })
+        Self::new(RedisMode::Slave {
+            master_host,
+            master_port,
+        })
     }
 
-    pub fn handle_command(&self, command: RedisCommand) -> anyhow::Result<RedisValue> {
+    pub fn handle_command(&self, command: RedisCommand, stream: &mut TcpStream) -> anyhow::Result<()> {
         match command {
-            RedisCommand::Ping => ping::process(),
-            RedisCommand::Echo { echo } => echo::process(echo),
-            RedisCommand::Info { section } => info::process(section, self),
-            RedisCommand::Get { key } => get::process(key, self),
-            RedisCommand::Set { key, value, px } => set::process(key, value, px, self),
+            RedisCommand::Ping => ping::process(stream),
+            RedisCommand::Echo { echo } => echo::process(echo, stream),
+            RedisCommand::Info { section } => info::process(section, self, stream),
+            RedisCommand::Get { key } => get::process(key, self, stream),
+            RedisCommand::Set { key, value, px } => set::process(key, value, px, self, stream),
         }
     }
 
