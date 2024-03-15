@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::Write,
-    net::{SocketAddr, TcpStream},
+    net::TcpStream,
     sync::{Mutex, MutexGuard},
     time::SystemTime,
 };
@@ -68,8 +68,7 @@ impl Redis {
                 master_host,
                 master_port,
             } => {
-                let addr = format!("{master_host}:{master_port}").parse::<SocketAddr>()?;
-                let mut stream = TcpStream::connect(&addr)?;
+                let mut stream = TcpStream::connect(format!("{master_host}:{master_port}"))?;
                 write!(
                     stream,
                     "{}",
@@ -79,7 +78,7 @@ impl Redis {
                             .collect::<VecDeque<_>>()
                     )
                 )?;
-                
+
                 Ok(())
             }
             RedisMode::Master { .. } => Err(anyhow::anyhow!(
