@@ -9,8 +9,7 @@ pub fn process(section: InfoSection, redis: &Redis) -> anyhow::Result<RedisValue
                 replication_id,
                 replication_offset,
             } => format!(
-                "role:master\nmaster_replid:{}\nmaster_repl_offset:{}",
-                replication_id, replication_offset
+                "role:master\nmaster_replid:{replication_id}\nmaster_repl_offset:{replication_offset}",
             ),
             RedisMode::Slave { .. } => "role:slave".to_string(),
         };

@@ -71,6 +71,10 @@ async fn main() -> anyhow::Result<()> {
     println!("[redis] server started at {url}");
 
     let redis = Arc::new(redis);
+    if redis.is_slave() {
+        redis.connect_to_master()?;
+    }
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {

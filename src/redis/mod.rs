@@ -1,6 +1,10 @@
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
-use std::time::SystemTime;
+use std::{
+    collections::{HashMap, VecDeque},
+    io::Write,
+    net::{SocketAddr, TcpStream},
+    sync::{Mutex, MutexGuard},
+    time::SystemTime,
+};
 
 use self::commands::{echo, get, info, ping, set, RedisCommand};
 use self::value::RedisValue;
@@ -52,6 +56,36 @@ impl Redis {
             master_host,
             master_port,
         })
+    }
+
+    pub fn is_slave(&self) -> bool {
+        matches!(self.mode, RedisMode::Slave { .. })
+    }
+
+    pub fn connect_to_master(&self) -> anyhow::Result<()> {
+        match &self.mode {
+            RedisMode::Slave {
+                master_host,
+                master_port,
+            } => {
+                let addr = format!("{master_host}:{master_port}").parse::<SocketAddr>()?;
+                let mut stream = TcpStream::connect(&addr)?;
+                write!(
+                    stream,
+                    "{}",
+                    RedisValue::Array(
+                        [RedisValue::BulkString("ping".to_string())]
+                            .into_iter()
+                            .collect::<VecDeque<_>>()
+                    )
+                )?;
+                
+                Ok(())
+            }
+            RedisMode::Master { .. } => Err(anyhow::anyhow!(
+                "[redis - error] Redis must be running in slave mode"
+            )),
+        }
     }
 
     pub fn handle_command(&self, command: RedisCommand) -> anyhow::Result<RedisValue> {
