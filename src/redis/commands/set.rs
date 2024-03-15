@@ -6,9 +6,9 @@ pub fn process(
     key: String,
     value: String,
     px: Option<SystemTime>,
-    redis: &mut Redis,
+    redis: &Redis,
 ) -> anyhow::Result<RedisValue> {
-    redis.store.insert(
+    redis.lock_store().insert(
         key,
         StoreValue {
             value,

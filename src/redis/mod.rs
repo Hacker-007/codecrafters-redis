@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::io::Write;
-use std::net::TcpStream;
 use std::time::SystemTime;
+use std::sync::{Mutex, MutexGuard};
 
-use self::commands::{echo, get, ping, set, RedisCommand};
-use self::{resp_reader::RESPReader, value::RedisValue};
+use self::commands::{echo, get, info, ping, set, RedisCommand};
+use self::value::RedisValue;
 
-mod commands;
+pub mod commands;
 pub mod resp_reader;
 pub mod value;
 
@@ -17,38 +16,29 @@ struct StoreValue {
 }
 
 pub struct Redis {
-    reader: RESPReader,
-    writer: TcpStream,
-    store: HashMap<StoreKey, StoreValue>,
+    store: Mutex<HashMap<StoreKey, StoreValue>>,
 }
 
 impl Redis {
-    pub fn new(client: TcpStream) -> anyhow::Result<Self> {
-        let reader_client = client.try_clone()?;
-
-        Ok(Self {
-            reader: RESPReader::new(reader_client),
-            writer: client,
-            store: HashMap::new(),
-        })
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
     }
 
-    pub fn run(&mut self) -> anyhow::Result<()> {
-        loop {
-            let value = RedisValue::parse(&mut self.reader)?;
-            if let RedisValue::Array(values) = value {
-                let command: RedisCommand = values.try_into()?;
-                let result = match command {
-                    RedisCommand::Ping => ping::process()?,
-                    RedisCommand::Echo { echo } => echo::process(echo)?,
-                    RedisCommand::Get { key } => get::process(key, self)?,
-                    RedisCommand::Set { key, value, px } => set::process(key, value, px, self)?,
-                };
-
-                write!(self.writer, "{}", result)?;
-            } else {
-                println!("[redis - error] expected a command encoded as an array of binary strings")
-            }
+    pub fn handle_command(&self, command: RedisCommand) -> anyhow::Result<RedisValue> {
+        match command {
+            RedisCommand::Ping => ping::process(),
+            RedisCommand::Echo { echo } => echo::process(echo),
+            RedisCommand::Info { section } => info::process(section),
+            RedisCommand::Get { key } => get::process(key, self),
+            RedisCommand::Set { key, value, px } => set::process(key, value, px, self),
         }
+    }
+
+    pub(self) fn lock_store(&self) -> MutexGuard<'_, HashMap<StoreKey, StoreValue>> {
+        self.store
+            .lock()
+            .unwrap()
     }
 }

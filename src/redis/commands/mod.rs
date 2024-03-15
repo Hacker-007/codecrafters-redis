@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    str::FromStr,
     time::{Duration, SystemTime},
 };
 
@@ -7,14 +8,35 @@ use super::value::RedisValue;
 
 pub mod echo;
 pub mod get;
+pub mod info;
 pub mod ping;
 pub mod set;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InfoSection {
+    Replication,
+    Default,
+}
+
+impl FromStr for InfoSection {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "replication" => Ok(Self::Replication),
+            _ => Ok(Self::Default),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum RedisCommand {
     Ping,
     Echo {
         echo: String,
+    },
+    Info {
+        section: InfoSection,
     },
     Get {
         key: String,
@@ -31,6 +53,7 @@ trait RedisCommandParser {
     fn expect_arg(&mut self, command_name: &str, arg_name: &str) -> anyhow::Result<String>;
     fn attempt_arg(&mut self, command_name: &str, arg_name: &str)
         -> anyhow::Result<Option<String>>;
+    fn attempt_flag<T: FromStr>(&mut self) -> Option<T>;
 }
 
 impl RedisCommandParser for VecDeque<String> {
@@ -65,6 +88,17 @@ impl RedisCommandParser for VecDeque<String> {
             _ => Ok(None),
         }
     }
+
+    fn attempt_flag<T: FromStr>(&mut self) -> Option<T> {
+        if let Some(arg) = self.front() {
+            if let Ok(flag) = arg.parse::<T>() {
+                self.pop_front();
+                return Some(flag);
+            }
+        }
+
+        None
+    }
 }
 
 impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
@@ -92,6 +126,11 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
             "echo" => values
                 .expect_arg("echo", "echo")
                 .map(|echo| RedisCommand::Echo { echo }),
+            "info" => Ok(RedisCommand::Info {
+                section: values
+                    .attempt_flag::<InfoSection>()
+                    .unwrap_or(InfoSection::Default),
+            }),
             "get" => values
                 .expect_arg("get", "key")
                 .map(|key| RedisCommand::Get { key }),
