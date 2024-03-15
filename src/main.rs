@@ -36,24 +36,38 @@ async fn process_stream(mut stream: TcpStream, redis: Arc<Redis>) -> anyhow::Res
     Ok(())
 }
 
+fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
+    let mut args = std::env::args();
+    args.find(|arg_name| arg_name == option_name)
+        .map(|_| (option_parser)(args))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut args = std::env::args();
-    args.next();
-    let port = match args.next() {
-        Some(ref arg_name) if arg_name == "--port" => args
-            .next()
+    let port = parse_option("--port", |mut args| {
+        args.next()
             .expect("[redis - error] value expected for port")
             .parse::<u64>()
-            .expect("[redis - error] expected port value to be a positive number"),
-        _ => 6379,
-    };
+            .expect("[redis - error] expected port value to be a positive number")
+    })
+    .unwrap_or(6379);
+
+    let redis = parse_option("--replicaof", |mut args| {
+        (
+            args.next()
+                .expect("[redis - error] master host expected for replica"),
+            args.next()
+                .expect("[redis - error] master port expected for replic"),
+        )
+    })
+    .map(|(master_host, master_port)| Redis::slave(master_host, master_port))
+    .unwrap_or(Redis::master());
 
     let url = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&url)?;
     println!("[redis] server started at {url}");
 
-    let redis = Arc::new(Redis::new());
+    let redis = Arc::new(redis);
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
