@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::sync::{Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use self::commands::{echo, get, info, ping, set, RedisCommand};
+use self::value::RedisValue;
 
 pub mod commands;
 pub mod resp_reader;
@@ -54,13 +54,13 @@ impl Redis {
         })
     }
 
-    pub fn handle_command(&self, command: RedisCommand, stream: &mut TcpStream) -> anyhow::Result<()> {
+    pub fn handle_command(&self, command: RedisCommand) -> anyhow::Result<RedisValue> {
         match command {
-            RedisCommand::Ping => ping::process(stream),
-            RedisCommand::Echo { echo } => echo::process(echo, stream),
-            RedisCommand::Info { section } => info::process(section, self, stream),
-            RedisCommand::Get { key } => get::process(key, self, stream),
-            RedisCommand::Set { key, value, px } => set::process(key, value, px, self, stream),
+            RedisCommand::Ping => ping::process(),
+            RedisCommand::Echo { echo } => echo::process(echo),
+            RedisCommand::Info { section } => info::process(section, self),
+            RedisCommand::Get { key } => get::process(key, self),
+            RedisCommand::Set { key, value, px } => set::process(key, value, px, self),
         }
     }
 

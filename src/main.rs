@@ -1,7 +1,10 @@
 mod redis;
 
-use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
+use std::{
+    io::Write,
+    net::{SocketAddr, TcpListener, TcpStream},
+};
 
 use crate::redis::{commands::RedisCommand, resp_reader::RESPReader, value::RedisValue, Redis};
 
@@ -23,7 +26,8 @@ async fn process_stream(mut stream: TcpStream, redis: Arc<Redis>) -> anyhow::Res
 
         if let RedisValue::Array(values) = value {
             let command: RedisCommand = values.try_into()?;
-            redis.handle_command(command, &mut stream)?;
+            let result = redis.handle_command(command)?;
+            write!(stream, "{}", result)?;
         } else {
             println!("[redis - error] expected a command encoded as an array of binary strings")
         }

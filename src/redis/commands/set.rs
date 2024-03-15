@@ -1,4 +1,4 @@
-use std::{io::Write, net::TcpStream, time::SystemTime};
+use std::time::SystemTime;
 
 use crate::redis::{value::RedisValue, Redis, StoreValue};
 
@@ -7,8 +7,7 @@ pub fn process(
     value: String,
     px: Option<SystemTime>,
     redis: &Redis,
-    stream: &mut TcpStream,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RedisValue> {
     redis.lock_store().insert(
         key,
         StoreValue {
@@ -17,6 +16,5 @@ pub fn process(
         },
     );
 
-    write!(stream, "{}", RedisValue::SimpleString("OK".to_string()))?;
-    Ok(())
+    Ok(RedisValue::SimpleString("OK".to_string()))
 }
