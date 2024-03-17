@@ -128,11 +128,11 @@ impl Redis {
             return Err(anyhow::anyhow!("[redis - error] expected a simple-string encoded response from the master"))
         };
 
-        if response == "OK" {
+        if response == "PONG" {
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "[redis - error] expected a simple-string encoded response from the master"
+                "[redis - error] expected 'PONG' from master but got '{response}'"
             ))
         }
     }
@@ -164,7 +164,7 @@ impl Redis {
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "[redis - error] expected a simple-string encoded response from the master"
+                "[redis - error] expected 'OK' from master but got '{response}'"
             ))
         }
     }
@@ -196,7 +196,7 @@ impl Redis {
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "[redis - error] expected a simple-string encoded response from the master"
+                "[redis - error] expected 'OK' from master but got '{response}'"
             ))
         }
     }
