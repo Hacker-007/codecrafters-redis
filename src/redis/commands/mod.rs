@@ -10,9 +10,10 @@ pub mod echo;
 pub mod get;
 pub mod info;
 pub mod ping;
-pub mod set;
-pub mod repl_conf_port;
 pub mod repl_conf_capa;
+pub mod repl_conf_port;
+pub mod set;
+pub mod psync;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InfoSection {
@@ -54,13 +55,20 @@ pub enum RedisCommand {
     ReplConfCapa {
         capabilities: Vec<String>,
     },
+    PSync {
+        replication_id: String,
+        replication_offset: String,
+    },
 }
 
 trait RedisCommandParser {
     fn parse_next(&mut self) -> String;
     fn expect_arg(&mut self, command_name: &str, arg_name: &str) -> anyhow::Result<String>;
-    fn attempt_arg(&mut self, command_name: &str, arg_name: &str)
-        -> anyhow::Result<Option<String>>;
+    fn attempt_named_arg(
+        &mut self,
+        command_name: &str,
+        arg_name: &str,
+    ) -> anyhow::Result<Option<String>>;
     fn attempt_flag<T: FromStr>(&mut self) -> Option<T>;
 }
 
@@ -79,7 +87,7 @@ impl RedisCommandParser for VecDeque<String> {
         }
     }
 
-    fn attempt_arg(
+    fn attempt_named_arg(
         &mut self,
         command_name: &str,
         arg_name: &str,
@@ -146,7 +154,7 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                 let key = values.expect_arg("set", "key")?;
                 let value = values.expect_arg("set", "value")?;
                 let px = values
-                    .attempt_arg("set", "px")?
+                    .attempt_named_arg("set", "px")?
                     .and_then(|millis| millis.parse::<u64>().ok())
                     .map(Duration::from_millis)
                     .map(|duration| SystemTime::now() + duration);
@@ -154,7 +162,7 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                 Ok(RedisCommand::Set { key, value, px })
             }
             "replconf" => {
-                if let Some(port) = values.attempt_arg("replconf", "listening-port")? {
+                if let Some(port) = values.attempt_named_arg("replconf", "listening-port")? {
                     let port = port.parse::<u64>()?;
                     return Ok(RedisCommand::ReplConfPort {
                         listening_port: port,
@@ -162,11 +170,19 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                 }
 
                 let mut capabilities = vec![];
-                while let Some(capability) = values.attempt_arg("replconf", "capa")? {
+                while let Some(capability) = values.attempt_named_arg("replconf", "capa")? {
                     capabilities.push(capability);
                 }
 
                 Ok(RedisCommand::ReplConfCapa { capabilities })
+            }
+            "psync" => {
+                let replication_id = values.expect_arg("psync", "replication_id")?;
+                let replication_offset = values.expect_arg("psync", "replication_offset")?;
+                Ok(RedisCommand::PSync {
+                    replication_id,
+                    replication_offset,
+                })
             }
             command => Err(anyhow::anyhow!(
                 "[redis - error] unknown command '{command}' received"

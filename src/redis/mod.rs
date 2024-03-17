@@ -6,7 +6,7 @@ use std::{
     time::SystemTime,
 };
 
-use self::{commands::{repl_conf_capa, repl_conf_port}, value::RedisValue};
+use self::{commands::{psync, repl_conf_capa, repl_conf_port}, value::RedisValue};
 use self::{
     commands::{echo, get, info, ping, set, RedisCommand},
     resp_reader::RESPReader,
@@ -103,6 +103,7 @@ impl Redis {
             RedisCommand::Set { key, value, px } => set::process(key, value, px, self),
             RedisCommand::ReplConfPort { .. } => repl_conf_port::process(),
             RedisCommand::ReplConfCapa { .. } => repl_conf_capa::process(),
+            RedisCommand::PSync { .. } => psync::process(self),
         }
     }
 
