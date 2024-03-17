@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     .map(|(master_host, master_port)| Redis::slave(port, master_host, master_port))
     .unwrap_or(Redis::master(port, 
         "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
-        "0".to_string(),
+        0,
     ));
 
     let url = format!("127.0.0.1:{port}");
@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("[redis] connection established with {ip}");
                 let redis = Arc::clone(&redis);
                 tokio::spawn(async move {
-                    process_stream(stream, redis).await?;
+                    let _ = process_stream(stream, redis).await;
                     println!("[redis] connection closed with {ip}");
                     Ok::<(), anyhow::Error>(())
                 });

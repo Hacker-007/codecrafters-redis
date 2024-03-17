@@ -26,7 +26,7 @@ struct StoreValue {
 enum RedisMode {
     Master {
         replication_id: String,
-        replication_offset: String,
+        replication_offset: usize,
     },
     Slave {
         master_host: String,
@@ -49,7 +49,7 @@ impl Redis {
         }
     }
 
-    pub fn master(port: u64, replication_id: String, replication_offset: String) -> Self {
+    pub fn master(port: u64, replication_id: String, replication_offset: usize) -> Self {
         Self::new(
             port,
             RedisMode::Master {
@@ -84,6 +84,7 @@ impl Redis {
                 self.send_ping_master(&stream, &mut reader)?;
                 self.send_replconf_port_master(&stream, &mut reader)?;
                 self.send_replconf_capa_master(&stream, &mut reader)?;
+                self.send_psync_master(&stream, &mut reader)?;
 
                 Ok(())
             }
@@ -193,6 +194,41 @@ impl Redis {
         };
 
         if response == "OK" {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "[redis - error] expected 'OK' from master but got '{response}'"
+            ))
+        }
+    }
+
+    fn send_psync_master(
+        &self,
+        mut stream: &TcpStream,
+        reader: &mut RESPReader,
+    ) -> anyhow::Result<()> {
+        write!(
+            stream,
+            "{}",
+            RedisValue::Array(
+                [
+                    RedisValue::BulkString("psync".to_string()),
+                    RedisValue::BulkString("?".to_string()),
+                    RedisValue::BulkString("-1".to_string()),
+                ]
+                .into_iter()
+                .collect::<VecDeque<_>>()
+            )
+        )?;
+
+        let Ok(RedisValue::SimpleString(response)) = RedisValue::parse(reader) else {
+            return Err(anyhow::anyhow!("[redis - error] expected a simple-string encoded response from the master"))
+        };
+
+        if let Some(master_info) = response.strip_prefix("FULLRESYNC ") {
+            let mut master_info = master_info.split_ascii_whitespace();
+            let _replication_id = master_info.next().unwrap();
+            let _replication_offset = master_info.next().unwrap().parse::<usize>()?;
             Ok(())
         } else {
             Err(anyhow::anyhow!(
