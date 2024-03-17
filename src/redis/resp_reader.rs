@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
+use bytes::Bytes;
 
 pub struct RESPReader {
     reader: BufReader<TcpStream>,
@@ -39,6 +40,14 @@ impl RESPReader {
         let s = self.read_string()?;
         s.parse()
             .context("[redis - error] value is not a valid signed number")
+    }
+
+    pub fn read_rdb_file(&mut self) -> anyhow::Result<Bytes> {
+        self.read_exact(&mut [0])?;
+        let length = self.read_usize()?;
+        let mut buf = vec![0; length];
+        self.read_exact(&mut buf)?;
+        Ok(Bytes::from_iter(buf))
     }
 }
 

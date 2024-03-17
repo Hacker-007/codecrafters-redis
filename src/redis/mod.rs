@@ -6,10 +6,13 @@ use std::{
     time::SystemTime,
 };
 
-use self::{commands::{psync, repl_conf_capa, repl_conf_port}, value::RedisValue};
 use self::{
     commands::{echo, get, info, ping, set, RedisCommand},
     resp_reader::RESPReader,
+};
+use self::{
+    commands::{psync, repl_conf_capa, repl_conf_port},
+    value::RedisValue,
 };
 
 pub mod commands;
@@ -94,16 +97,20 @@ impl Redis {
         }
     }
 
-    pub fn handle_command(&self, command: RedisCommand) -> anyhow::Result<RedisValue> {
+    pub fn handle_command(
+        &self,
+        command: RedisCommand,
+        stream: &mut TcpStream,
+    ) -> anyhow::Result<()> {
         match command {
-            RedisCommand::Ping => ping::process(),
-            RedisCommand::Echo { echo } => echo::process(echo),
-            RedisCommand::Info { section } => info::process(section, self),
-            RedisCommand::Get { key } => get::process(key, self),
-            RedisCommand::Set { key, value, px } => set::process(key, value, px, self),
-            RedisCommand::ReplConfPort { .. } => repl_conf_port::process(),
-            RedisCommand::ReplConfCapa { .. } => repl_conf_capa::process(),
-            RedisCommand::PSync { .. } => psync::process(self),
+            RedisCommand::Ping => ping::process(stream),
+            RedisCommand::Echo { echo } => echo::process(echo, stream),
+            RedisCommand::Info { section } => info::process(section, self, stream),
+            RedisCommand::Get { key } => get::process(key, self, stream),
+            RedisCommand::Set { key, value, px } => set::process(key, value, px, self, stream),
+            RedisCommand::ReplConfPort { .. } => repl_conf_port::process(stream),
+            RedisCommand::ReplConfCapa { .. } => repl_conf_capa::process(stream),
+            RedisCommand::PSync { .. } => psync::process(self, stream),
         }
     }
 
@@ -232,6 +239,7 @@ impl Redis {
             let mut master_info = master_info.split_ascii_whitespace();
             let _replication_id = master_info.next().unwrap();
             let _replication_offset = master_info.next().unwrap().parse::<usize>()?;
+            let _rdb_file = reader.read_rdb_file()?;
             Ok(())
         } else {
             Err(anyhow::anyhow!(

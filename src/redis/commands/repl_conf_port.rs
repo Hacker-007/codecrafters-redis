@@ -1,5 +1,8 @@
+use std::{io::Write, net::TcpStream};
+
 use crate::redis::value::RedisValue;
 
-pub fn process() -> anyhow::Result<RedisValue> {
-    Ok(RedisValue::SimpleString("OK".to_string()))
+pub fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
+    write!(stream, "{}", RedisValue::SimpleString("OK".to_string()))?;
+    Ok(())
 }
