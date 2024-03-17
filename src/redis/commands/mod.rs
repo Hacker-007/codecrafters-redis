@@ -11,6 +11,8 @@ pub mod get;
 pub mod info;
 pub mod ping;
 pub mod set;
+pub mod repl_conf_port;
+pub mod repl_conf_capa;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InfoSection {
@@ -45,6 +47,12 @@ pub enum RedisCommand {
         key: String,
         value: String,
         px: Option<SystemTime>,
+    },
+    ReplConfPort {
+        listening_port: u64,
+    },
+    ReplConfCapa {
+        capabilities: Vec<String>,
     },
 }
 
@@ -144,6 +152,21 @@ impl TryFrom<VecDeque<RedisValue>> for RedisCommand {
                     .map(|duration| SystemTime::now() + duration);
 
                 Ok(RedisCommand::Set { key, value, px })
+            }
+            "replconf" => {
+                if let Some(port) = values.attempt_arg("replconf", "listening-port")? {
+                    let port = port.parse::<u64>()?;
+                    return Ok(RedisCommand::ReplConfPort {
+                        listening_port: port,
+                    });
+                }
+
+                let mut capabilities = vec![];
+                while let Some(capability) = values.attempt_arg("replconf", "capa")? {
+                    capabilities.push(capability);
+                }
+
+                Ok(RedisCommand::ReplConfCapa { capabilities })
             }
             command => Err(anyhow::anyhow!(
                 "[redis - error] unknown command '{command}' received"
