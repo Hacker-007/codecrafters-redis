@@ -7,7 +7,7 @@ pub fn process(redis: &Redis) -> anyhow::Result<RedisValue> {
     } = &redis.mode
     {
         Ok(RedisValue::SimpleString(format!(
-            "FULLSYNC {} {}",
+            "FULLRESYNC {} {}",
             replication_id, *replication_offset
         )))
     } else {
