@@ -60,8 +60,8 @@ async fn main() -> anyhow::Result<()> {
                 .expect("[redis - error] master port expected for replic"),
         )
     })
-    .map(|(master_host, master_port)| Redis::slave(master_host, master_port))
-    .unwrap_or(Redis::master(
+    .map(|(master_host, master_port)| Redis::slave(port, master_host, master_port))
+    .unwrap_or(Redis::master(port, 
         "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
         "0".to_string(),
     ));
