@@ -1,4 +1,4 @@
-use std::{io::Write, net::TcpStream};
+use std::io::Write;
 
 use bytes::Bytes;
 
@@ -6,7 +6,7 @@ use crate::redis::{value::RedisValue, Redis, RedisMode};
 
 const EMPTY_RDB_HEX: &'static str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
-pub fn process(redis: &Redis, stream: &mut TcpStream) -> anyhow::Result<()> {
+pub fn process(redis: &Redis, stream: &mut impl Write) -> anyhow::Result<()> {
     if let RedisMode::Master {
         replication_id,
         replication_offset,
@@ -29,9 +29,6 @@ pub fn process(redis: &Redis, stream: &mut TcpStream) -> anyhow::Result<()> {
 
         write!(stream, "${}\r\n", rdb_file.len())?;
         stream.write_all(&rdb_file)?;
-        let stream = stream.try_clone()?;
-        redis.add_slave_stream(stream)?;
-        
         return Ok(());
     } else {
         Err(anyhow::anyhow!(

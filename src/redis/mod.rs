@@ -74,11 +74,15 @@ impl Redis {
         )
     }
 
+    pub fn is_master(&self) -> bool {
+        matches!(self.mode, RedisMode::Master { .. })
+    }
+
     pub fn is_slave(&self) -> bool {
         matches!(self.mode, RedisMode::Slave { .. })
     }
 
-    pub fn connect_to_master(&self) -> anyhow::Result<()> {
+    pub fn connect_to_master(&self) -> anyhow::Result<TcpStream> {
         match &self.mode {
             RedisMode::Slave {
                 master_host,
@@ -90,8 +94,7 @@ impl Redis {
                 self.send_replconf_port_master(&stream, &mut reader)?;
                 self.send_replconf_capa_master(&stream, &mut reader)?;
                 self.send_psync_master(&stream, &mut reader)?;
-
-                Ok(())
+                Ok(stream)
             }
             RedisMode::Master { .. } => Err(anyhow::anyhow!(
                 "[redis - error] Redis must be running in slave mode"
@@ -102,7 +105,7 @@ impl Redis {
     pub fn handle_command(
         &self,
         command: RedisCommand,
-        stream: &mut TcpStream,
+        stream: &mut impl Write,
     ) -> anyhow::Result<()> {
         match command {
             RedisCommand::Ping => ping::process(stream),

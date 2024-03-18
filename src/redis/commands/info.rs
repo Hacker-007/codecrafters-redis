@@ -1,14 +1,10 @@
-use std::{io::Write, net::TcpStream};
+use std::io::Write;
 
 use crate::redis::{value::RedisValue, Redis, RedisMode};
 
 use super::InfoSection;
 
-pub fn process(
-    section: InfoSection,
-    redis: &Redis,
-    stream: &mut TcpStream,
-) -> anyhow::Result<()> {
+pub fn process(section: InfoSection, redis: &Redis, stream: &mut impl Write) -> anyhow::Result<()> {
     if section == InfoSection::Replication {
         let info = match &redis.mode {
             RedisMode::Master {
@@ -22,7 +18,7 @@ pub fn process(
         };
 
         write!(stream, "{}", RedisValue::BulkString(info))?;
-        return Ok(())
+        return Ok(());
     }
 
     Err(anyhow::anyhow!(

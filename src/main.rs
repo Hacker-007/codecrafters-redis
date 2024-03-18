@@ -24,12 +24,14 @@ async fn process_stream(mut stream: TcpStream, redis: Arc<Redis>) -> anyhow::Res
         if let RedisValue::Array(values) = value {
             let command: RedisCommand = values.try_into()?;
             redis.handle_command(command.clone(), &mut stream)?;
-            if command.is_write() {
+            if let RedisCommand::PSync { .. } = &command {
+                let stream = stream.try_clone()?;
+                redis.add_slave_stream(stream)?;
+            }
+
+            if redis.is_master() && command.is_write() {
                 let redis = redis.clone();
-                tokio::spawn(async move {
-                    redis.propogate_to_slaves(command)?;
-                    Result::<(), anyhow::Error>::Ok(())
-                });
+                redis.propogate_to_slaves(command)?;
             }
         } else {
             println!("[redis - error] expected a command encoded as an array of binary strings")
@@ -76,7 +78,27 @@ async fn main() -> anyhow::Result<()> {
 
     let redis = Arc::new(redis);
     if redis.is_slave() {
-        redis.connect_to_master()?;
+        let master_stream = redis.connect_to_master()?;
+        let redis = Arc::clone(&redis);
+        tokio::spawn(async move {
+            let mut reader = RESPReader::new(master_stream);
+            loop {
+                let Ok(value) = RedisValue::parse(&mut reader) else {
+                    break
+                };
+
+                if let RedisValue::Array(values) = value {
+                    let command: RedisCommand = values.try_into()?;
+                    redis.handle_command(command, &mut std::io::sink())?;
+                } else {
+                    println!(
+                        "[redis - error] expected a command encoded as an array of binary strings"
+                    )
+                }
+            }
+
+            Result::<(), anyhow::Error>::Ok(())
+        });
     }
 
     for stream in listener.incoming() {
