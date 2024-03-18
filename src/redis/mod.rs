@@ -30,6 +30,7 @@ enum RedisMode {
     Master {
         replication_id: String,
         replication_offset: usize,
+        slaves: Mutex<Vec<TcpStream>>,
     },
     Slave {
         master_host: String,
@@ -58,6 +59,7 @@ impl Redis {
             RedisMode::Master {
                 replication_id,
                 replication_offset,
+                slaves: Mutex::new(vec![]),
             },
         )
     }
@@ -116,6 +118,27 @@ impl Redis {
 
     pub(self) fn lock_store(&self) -> MutexGuard<'_, HashMap<StoreKey, StoreValue>> {
         self.store.lock().unwrap()
+    }
+
+    pub fn add_slave_stream(&self, stream: TcpStream) -> anyhow::Result<()> {
+        if let RedisMode::Master { slaves, .. } = &self.mode {
+            let mut slaves = slaves.lock().unwrap();
+            slaves.push(stream);
+        }
+
+        Ok(())
+    }
+
+    pub fn propogate_to_slaves(&self, input: RedisCommand) -> anyhow::Result<()> {
+        if let RedisMode::Master { slaves, .. } = &self.mode {
+            let mut slaves = slaves.lock().unwrap();
+            slaves
+                .iter_mut()
+                .map(|slave| write!(slave, "{}", RedisValue::from(input.clone())))
+                .collect::<Result<_, _>>()?;
+        }
+
+        Ok(())
     }
 }
 

@@ -10,6 +10,7 @@ pub fn process(redis: &Redis, stream: &mut TcpStream) -> anyhow::Result<()> {
     if let RedisMode::Master {
         replication_id,
         replication_offset,
+        ..
     } = &redis.mode
     {
         write!(
@@ -28,6 +29,9 @@ pub fn process(redis: &Redis, stream: &mut TcpStream) -> anyhow::Result<()> {
 
         write!(stream, "${}\r\n", rdb_file.len())?;
         stream.write_all(&rdb_file)?;
+        let stream = stream.try_clone()?;
+        redis.add_slave_stream(stream)?;
+        
         return Ok(());
     } else {
         Err(anyhow::anyhow!(

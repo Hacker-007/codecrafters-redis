@@ -10,12 +10,12 @@ pub mod echo;
 pub mod get;
 pub mod info;
 pub mod ping;
+pub mod psync;
 pub mod repl_conf_capa;
 pub mod repl_conf_port;
 pub mod set;
-pub mod psync;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InfoSection {
     Replication,
     Default,
@@ -32,7 +32,7 @@ impl FromStr for InfoSection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RedisCommand {
     Ping,
     Echo {
@@ -59,6 +59,92 @@ pub enum RedisCommand {
         replication_id: String,
         replication_offset: String,
     },
+}
+
+impl RedisCommand {
+    pub fn is_write(&self) -> bool {
+        matches!(self, RedisCommand::Set { .. })
+    }
+}
+
+impl From<RedisCommand> for RedisValue {
+    fn from(command: RedisCommand) -> Self {
+        match command {
+            RedisCommand::Ping => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("ping".to_string()));
+                RedisValue::Array(parts)
+            }
+            RedisCommand::Echo { echo } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("echo".to_string()));
+                parts.push_back(RedisValue::BulkString(echo));
+                RedisValue::Array(parts)
+            }
+            RedisCommand::Info { section } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("info".to_string()));
+                match section {
+                    InfoSection::Replication => {
+                        parts.push_back(RedisValue::BulkString("replication".to_string()))
+                    }
+                    InfoSection::Default => {
+                        parts.push_back(RedisValue::BulkString("default".to_string()))
+                    }
+                }
+                
+                RedisValue::Array(parts)
+            }
+            RedisCommand::Get { key } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("get".to_string()));
+                parts.push_back(RedisValue::BulkString(key));
+                RedisValue::Array(parts)
+            }
+            RedisCommand::Set { key, value, px } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("set".to_string()));
+                parts.push_back(RedisValue::BulkString(key));
+                parts.push_back(RedisValue::BulkString(value));
+                if let Some(px) = px {
+                    if px > SystemTime::now() {
+                        let duration = px.duration_since(SystemTime::now()).unwrap();
+                        parts.push_back(RedisValue::BulkString("px".to_string()));
+                        parts.push_back(RedisValue::BulkString(duration.as_millis().to_string()));
+                    }
+                }
+
+                RedisValue::Array(parts)
+            }
+            RedisCommand::ReplConfPort { listening_port } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("replconf".to_string()));
+                parts.push_back(RedisValue::BulkString("listening-port".to_string()));
+                parts.push_back(RedisValue::BulkString(listening_port.to_string()));
+                RedisValue::Array(parts)
+            }
+            RedisCommand::ReplConfCapa { capabilities } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("replconf".to_string()));
+                capabilities.into_iter().for_each(|capability| {
+                    parts.push_back(RedisValue::BulkString("capa".to_string()));
+                    parts.push_back(RedisValue::BulkString(capability));
+                });
+
+                RedisValue::Array(parts)
+            }
+            RedisCommand::PSync {
+                replication_id,
+                replication_offset,
+            } => {
+                let mut parts = VecDeque::new();
+                parts.push_back(RedisValue::BulkString("psync".to_string()));
+                parts.push_back(RedisValue::BulkString(replication_id));
+                parts.push_back(RedisValue::BulkString(replication_offset));
+                RedisValue::Array(parts)
+            }
+        }
+    }
 }
 
 trait RedisCommandParser {

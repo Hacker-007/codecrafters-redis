@@ -23,7 +23,14 @@ async fn process_stream(mut stream: TcpStream, redis: Arc<Redis>) -> anyhow::Res
 
         if let RedisValue::Array(values) = value {
             let command: RedisCommand = values.try_into()?;
-            redis.handle_command(command, &mut stream)?;
+            redis.handle_command(command.clone(), &mut stream)?;
+            if command.is_write() {
+                let redis = redis.clone();
+                tokio::spawn(async move {
+                    redis.propogate_to_slaves(command)?;
+                    Result::<(), anyhow::Error>::Ok(())
+                });
+            }
         } else {
             println!("[redis - error] expected a command encoded as an array of binary strings")
         }

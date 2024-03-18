@@ -14,6 +14,7 @@ pub fn process(
             RedisMode::Master {
                 replication_id,
                 replication_offset,
+                ..
             } => format!(
                 "role:master\nmaster_replid:{replication_id}\nmaster_repl_offset:{replication_offset}",
             ),
