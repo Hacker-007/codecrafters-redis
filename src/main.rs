@@ -1,123 +1,17 @@
 mod redis;
 
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
-
-use crate::redis::{commands::RedisCommand, resp_reader::RESPReader, value::RedisValue, Redis};
-
-fn get_stream_ip(stream: &TcpStream) -> anyhow::Result<String> {
-    let ip = match stream.local_addr()? {
-        SocketAddr::V4(addr) => addr.ip().to_string(),
-        SocketAddr::V6(addr) => addr.ip().to_string(),
-    };
-
-    Ok(ip)
-}
-
-async fn process_stream(mut stream: TcpStream, redis: Arc<Redis>) -> anyhow::Result<()> {
-    let mut reader = RESPReader::new(stream.try_clone()?);
-    loop {
-        let Ok(value) = RedisValue::parse(&mut reader) else {
-            break
-        };
-
-        if let RedisValue::Array(values) = value {
-            let command: RedisCommand = values.try_into()?;
-            redis.handle_command(command.clone(), &mut stream)?;
-            if let RedisCommand::PSync { .. } = &command {
-                let stream = stream.try_clone()?;
-                redis.add_slave_stream(stream)?;
-            }
-
-            if redis.is_master() && command.is_write() {
-                let redis = redis.clone();
-                redis.propogate_to_slaves(command)?;
-            }
-        } else {
-            println!("[redis - error] expected a command encoded as an array of binary strings")
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
-    let mut args = std::env::args();
-    args.find(|arg_name| arg_name == option_name)
-        .map(|_| (option_parser)(args))
-}
+use redis::server::RedisServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let port = parse_option("--port", |mut args| {
-        args.next()
-            .expect("[redis - error] value expected for port")
-            .parse::<u64>()
-            .expect("[redis - error] expected port value to be a positive number")
-    })
-    .unwrap_or(6379);
-
-    let redis = parse_option("--replicaof", |mut args| {
-        (
-            args.next()
-                .expect("[redis - error] master host expected for replica"),
-            args.next()
-                .expect("[redis - error] master port expected for replic"),
-        )
-    })
-    .map(|(master_host, master_port)| Redis::slave(port, master_host, master_port))
-    .unwrap_or(Redis::master(
-        port,
-        "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
-        0,
-    ));
-
-    let url = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&url)?;
-    println!("[redis] server started at {url}");
-
-    let redis = Arc::new(redis);
-    if redis.is_slave() {
-        let master_stream = redis.connect_to_master()?;
-        let redis = Arc::clone(&redis);
-        tokio::spawn(async move {
-            let mut reader = RESPReader::new(master_stream);
-            loop {
-                let Ok(value) = RedisValue::parse(&mut reader) else {
-                    break
-                };
-
-                if let RedisValue::Array(values) = value {
-                    let command: RedisCommand = values.try_into()?;
-                    redis.handle_command(command, &mut std::io::sink())?;
-                } else {
-                    println!(
-                        "[redis - error] expected a command encoded as an array of binary strings"
-                    )
-                }
+    let redis = RedisServer::start().await?;
+    loop {
+        match redis.accept().await {
+            Ok((stream, addr)) => {
+                eprintln!("[redis] connected to client at {addr}")
+                
             }
-
-            Result::<(), anyhow::Error>::Ok(())
-        });
-    }
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                let ip = get_stream_ip(&stream)?;
-                println!("[redis] connection established with {ip}");
-                let redis = Arc::clone(&redis);
-                tokio::spawn(async move {
-                    let _ = process_stream(stream, redis).await;
-                    println!("[redis] connection closed with {ip}");
-                    Ok::<(), anyhow::Error>(())
-                });
-            }
-            Err(err) => {
-                eprintln!("[redis - error] unknown error occurred: {}", err);
-            }
+            Err(_) => eprintln!("[redis - error] unable to connect to client"),
         }
     }
-
-    Ok(())
 }
