@@ -1,6 +1,7 @@
 mod redis;
 
-use redis::server::{Redis, RedisMode};
+use bytes::BytesMut;
+use redis::{server::RedisServer, CommandPacket, Redis, RedisMode};
 
 fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
     let mut args = std::env::args();
@@ -30,8 +31,25 @@ async fn main() -> anyhow::Result<()> {
         master_host: host,
         master_port: port,
     })
-    .unwrap_or(RedisMode::Master);
+    .unwrap_or(RedisMode::Master {
+        replication_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+        replication_offset: 0,
+    });
 
-    let redis = Redis::start(port, redis_mode).await?;
-    redis.run().await
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    tokio::spawn(async move {
+        let mut redis = Redis::new(redis_mode);
+        while let Some(CommandPacket { command, response_tx }) = rx.recv().await {
+            let mut output_sink = BytesMut::with_capacity(4096);
+            redis.handle(command, &mut output_sink)?;
+            if let Err(_) = response_tx.send(output_sink) {
+                eprintln!("[redis - error] unknown error occurred when sending response")
+            }
+        }
+
+        anyhow::Ok(())
+    });
+    
+    let server = RedisServer::start(port).await?;
+    server.run(tx).await
 }

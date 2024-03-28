@@ -1,6 +1,8 @@
+use std::{collections::VecDeque, fmt::Display};
+
 use anyhow::Context;
-use bytes::{Bytes, BytesMut};
-use tokio::{io::AsyncReadExt, net::tcp::OwnedReadHalf};
+use bytes::BytesMut;
+use tokio::io::AsyncReadExt;
 
 macro_rules! try_parse {
     ($e:expr) => {
@@ -13,13 +15,34 @@ macro_rules! try_parse {
 
 #[derive(Debug)]
 pub enum RESPValue {
-    SimpleString(Bytes),
-    SimpleError(Bytes),
+    SimpleString(String),
+    SimpleError(String),
     Integer(i64),
-    BulkString(Bytes),
+    BulkString(String),
     NullBulkString,
-    Array(Vec<RESPValue>),
+    Array(VecDeque<RESPValue>),
     NullArray,
+}
+
+impl Display for RESPValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RESPValue::SimpleString(value) => write!(f, "+{value}\r\n"),
+            RESPValue::SimpleError(error) => write!(f, "-{error}\r\n"),
+            RESPValue::Integer(value) => write!(f, ":{value}\r\n"),
+            RESPValue::BulkString(value) => write!(f, "${}\r\n{}\r\n", value.len(), value),
+            RESPValue::NullBulkString => write!(f, "$-1\r\n"),
+            RESPValue::Array(values) => {
+                write!(f, "*{}\r\n", values.len())?;
+                for value in values {
+                    write!(f, "{value}")?;
+                }
+
+                Ok(())
+            }
+            RESPValue::NullArray => write!(f, "*-1\r\n"),
+        }
+    }
 }
 
 pub struct RESPValueReader {
@@ -35,12 +58,17 @@ impl RESPValueReader {
         }
     }
 
-    pub async fn next_value(&mut self, mut reader: OwnedReadHalf) -> anyhow::Result<RESPValue> {
+    pub async fn next_value<R: AsyncReadExt + Unpin>(
+        &mut self,
+        reader: &mut R,
+    ) -> anyhow::Result<RESPValue> {
         loop {
             let mut bytes = [0u8; 4096];
             let n = reader.read_buf(&mut &mut bytes[..]).await?;
             if n == 0 {
-                return Err(anyhow::anyhow!("[redis - error] reading from closed connection with client"))
+                return Err(anyhow::anyhow!(
+                    "[redis - error] reading from closed connection with client"
+                ));
             }
 
             self.buf.extend_from_slice(&bytes);
@@ -68,18 +96,18 @@ impl RESPValueReader {
         let start = self.cursor;
         let crlf_pos = try_parse!(self.read_until(b'\r'));
         try_parse!(self.parse_crlf()?);
-        Ok(Some(RESPValue::SimpleString(Bytes::copy_from_slice(
-            &self.buf[start..crlf_pos],
-        ))))
+
+        let s = String::from_utf8(self.buf[start..crlf_pos].to_vec())?;
+        Ok(Some(RESPValue::SimpleString(s)))
     }
 
     fn parse_resp_simple_error(&mut self) -> anyhow::Result<Option<RESPValue>> {
         let start = self.cursor;
         let crlf_pos = try_parse!(self.read_until(b'\r'));
         try_parse!(self.parse_crlf()?);
-        Ok(Some(RESPValue::SimpleError(Bytes::copy_from_slice(
-            &self.buf[start..crlf_pos],
-        ))))
+
+        let s = String::from_utf8(self.buf[start..crlf_pos].to_vec())?;
+        Ok(Some(RESPValue::SimpleError(s)))
     }
 
     fn parse_resp_integer(&mut self) -> anyhow::Result<Option<RESPValue>> {
@@ -97,10 +125,10 @@ impl RESPValueReader {
             return Ok(None);
         }
 
-        let bytes = Bytes::copy_from_slice(&self.buf[self.cursor..self.cursor + length as usize]);
+        let s = String::from_utf8(self.buf[self.cursor..self.cursor + length as usize].to_vec())?;
         self.cursor += length as usize;
         try_parse!(self.parse_crlf()?);
-        Ok(Some(RESPValue::BulkString(bytes)))
+        Ok(Some(RESPValue::BulkString(s)))
     }
 
     fn parse_resp_array(&mut self) -> anyhow::Result<Option<RESPValue>> {
@@ -109,10 +137,10 @@ impl RESPValueReader {
             return Ok(Some(RESPValue::NullArray));
         }
 
-        let mut values = vec![];
+        let mut values = VecDeque::new();
         for _ in 0..length {
             let value = try_parse!(self.parse()?);
-            values.push(value);
+            values.push_back(value);
         }
 
         Ok(Some(RESPValue::Array(values)))
