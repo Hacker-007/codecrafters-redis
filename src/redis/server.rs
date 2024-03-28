@@ -25,7 +25,7 @@ impl RedisServer {
             eprintln!("[redis] connection established with {addr}");
             let tx = tx.clone();
             tokio::spawn(async move {
-                let _ = Self::process_stream(client_stream, tx);
+                let _ = Self::process_stream(client_stream, tx).await;
                 eprintln!("[redis] connection closed with {addr}");
                 anyhow::Ok(())
             });
