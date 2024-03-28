@@ -58,7 +58,7 @@ impl RESPValueReader {
         }
     }
 
-    pub async fn next_value<R: AsyncReadExt + Unpin>(
+    pub async fn read_value<R: AsyncReadExt + Unpin>(
         &mut self,
         reader: &mut R,
     ) -> anyhow::Result<RESPValue> {
@@ -74,6 +74,7 @@ impl RESPValueReader {
             self.buf.extend_from_slice(&bytes);
             self.cursor = 0;
             if let Some(value) = self.parse()? {
+                self.buf.clear();
                 return Ok(value);
             }
         }

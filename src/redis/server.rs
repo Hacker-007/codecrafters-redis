@@ -1,7 +1,7 @@
 use tokio::{
-    io::AsyncWriteExt, net::{
-        TcpListener, TcpStream,
-    }, sync::{mpsc, oneshot}
+    io::AsyncWriteExt,
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, oneshot},
 };
 
 use crate::redis::{command::Command, resp::RESPValueReader};
@@ -39,7 +39,7 @@ impl RedisServer {
         let (mut read_stream, mut write_stream) = client_stream.split();
         let mut reader = RESPValueReader::new();
         loop {
-            let value = reader.next_value(&mut read_stream).await?;
+            let value = reader.read_value(&mut read_stream).await?;
             let command: Command = value.try_into()?;
             let (response_tx, response_rx) = oneshot::channel();
             tx.send(CommandPacket::new(command, response_tx)).await?;
