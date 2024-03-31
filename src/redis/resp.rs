@@ -58,6 +58,28 @@ impl RESPValueReader {
         }
     }
 
+    pub async fn read_rdb_file<R: AsyncReadExt + Unpin>(
+        &mut self,
+        reader: &mut R,
+    ) -> anyhow::Result<String> {
+        loop {
+            let mut bytes = [0u8; 4096];
+            let n = reader.read_buf(&mut &mut bytes[..]).await?;
+            if n == 0 {
+                return Err(anyhow::anyhow!(
+                    "[redis - error] reading from closed connection with client"
+                ));
+            }
+
+            self.buf.extend_from_slice(&bytes);
+            self.cursor = 0;
+            if let Some(value) = self.parse_rdb_file()? {
+                self.buf.clear();
+                return Ok(value);
+            }
+        }
+    }
+
     pub async fn read_value<R: AsyncReadExt + Unpin>(
         &mut self,
         reader: &mut R,
@@ -123,6 +145,7 @@ impl RESPValueReader {
         }
 
         if self.buf.get(self.cursor + length as usize).is_none() {
+            self.buf.reserve(self.cursor + length as usize);
             return Ok(None);
         }
 
@@ -145,6 +168,22 @@ impl RESPValueReader {
         }
 
         Ok(Some(RESPValue::Array(values)))
+    }
+
+    fn parse_rdb_file(&mut self) -> anyhow::Result<Option<String>> {
+        if try_parse!(self.advance()) != b'$' {
+            return Err(anyhow::anyhow!("[redis - error] expected an RDB file"));
+        }
+
+        let length = try_parse!(self.parse_integer()?);
+        if self.buf.get(self.cursor + length as usize).is_none() {
+            self.buf.reserve(self.cursor + length as usize);
+            return Ok(None);
+        }
+
+        let s = String::from_utf8(self.buf[self.cursor..self.cursor + length as usize].to_vec())?;
+        self.cursor += length as usize;
+        Ok(Some(s))
     }
 
     fn parse_integer(&mut self) -> anyhow::Result<Option<i64>> {

@@ -10,10 +10,11 @@ use self::{
 
 pub mod command;
 pub mod resp;
+pub mod resp_builder;
 pub mod server;
 pub mod store;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RedisMode {
     Slave {
         master_host: String,

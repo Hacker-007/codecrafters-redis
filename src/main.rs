@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         replication_offset: 0,
     });
 
+    let cloned_redis_mode = redis_mode.clone();
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     tokio::spawn(async move {
         let mut redis = Redis::new(redis_mode);
@@ -50,6 +51,6 @@ async fn main() -> anyhow::Result<()> {
         anyhow::Ok(())
     });
     
-    let server = RedisServer::start(port).await?;
+    let server = RedisServer::start(port, cloned_redis_mode).await?;
     server.run(tx).await
 }
