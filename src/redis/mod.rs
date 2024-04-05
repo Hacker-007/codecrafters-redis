@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use std::{fmt::Write, io::Write as IOWrite, ops::DerefMut, time::SystemTime};
 use tokio::sync::oneshot;
 
@@ -28,11 +28,11 @@ pub enum RedisMode {
 
 pub struct CommandPacket {
     pub command: Command,
-    pub response_tx: oneshot::Sender<BytesMut>,
+    pub response_tx: oneshot::Sender<Vec<u8>>,
 }
 
 impl CommandPacket {
-    pub fn new(command: Command, response_tx: oneshot::Sender<BytesMut>) -> Self {
+    pub fn new(command: Command, response_tx: oneshot::Sender<Vec<u8>>) -> Self {
         Self {
             command,
             response_tx,
@@ -56,7 +56,7 @@ impl Redis {
         }
     }
 
-    pub fn handle(&mut self, command: Command, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    pub fn handle(&mut self, command: Command, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         match command {
             Command::Ping => self.ping(output_sink),
             Command::Echo { echo } => self.echo(echo, output_sink),
@@ -69,7 +69,7 @@ impl Redis {
         }
     }
 
-    fn ping(&mut self, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn ping(&mut self, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         write!(
             output_sink,
             "{}",
@@ -79,13 +79,13 @@ impl Redis {
         Ok(())
     }
 
-    fn echo(&mut self, echo: String, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn echo(&mut self, echo: String, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         write!(output_sink, "{}", RESPValue::BulkString(echo))?;
 
         Ok(())
     }
 
-    fn info(&mut self, section: InfoSection, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn info(&mut self, section: InfoSection, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         if section == InfoSection::Replication {
             let info = match &self.mode {
                 RedisMode::Master {
@@ -107,7 +107,7 @@ impl Redis {
         ))
     }
 
-    fn get(&mut self, key: String, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn get(&mut self, key: String, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         let value = match self.store.get(&key) {
             Some(StoreValue {
                 expiration: Some(expiration),
@@ -129,7 +129,7 @@ impl Redis {
         key: String,
         value: String,
         px: Option<SystemTime>,
-        output_sink: &mut BytesMut,
+        output_sink: &mut Vec<u8>,
     ) -> anyhow::Result<()> {
         self.store.insert(
             key,
@@ -142,17 +142,17 @@ impl Redis {
         Ok(())
     }
 
-    fn repl_conf_port(&mut self, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn repl_conf_port(&mut self, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         write!(output_sink, "{}", RESPValue::SimpleString("OK".to_string()))?;
         Ok(())
     }
 
-    fn repl_conf_capa(&mut self, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn repl_conf_capa(&mut self, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         write!(output_sink, "{}", RESPValue::SimpleString("OK".to_string()))?;
         Ok(())
     }
 
-    fn psync(&mut self, output_sink: &mut BytesMut) -> anyhow::Result<()> {
+    fn psync(&mut self, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         if let RedisMode::Master {
             replication_id,
             replication_offset,
@@ -171,10 +171,10 @@ impl Redis {
             let rdb_file = (0..EMPTY_RDB_HEX.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&EMPTY_RDB_HEX[i..i + 2], 16))
-                .collect::<Result<Bytes, _>>()?;
+                .collect::<Result<Vec<_>, _>>()?;
 
             write!(output_sink, "${}\r\n", rdb_file.len())?;
-            output_sink.deref_mut().write_all(&rdb_file)?;
+            output_sink.write_all(&rdb_file)?;
             return Ok(());
         } else {
             Err(anyhow::anyhow!(

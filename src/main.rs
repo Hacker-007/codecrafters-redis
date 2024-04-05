@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         let mut redis = Redis::new(redis_mode);
         while let Some(CommandPacket { command, response_tx }) = rx.recv().await {
-            let mut output_sink = BytesMut::with_capacity(4096);
+            let mut output_sink = Vec::with_capacity(4096);
             redis.handle(command, &mut output_sink)?;
             if let Err(_) = response_tx.send(output_sink) {
                 eprintln!("[redis - error] unknown error occurred when sending response")
