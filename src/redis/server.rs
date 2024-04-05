@@ -19,7 +19,9 @@ pub struct RedisServer {
 
 impl RedisServer {
     pub async fn start(port: u64, mode: RedisMode) -> anyhow::Result<Self> {
-        let tcp_listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
+        let server_address = format!("127.0.0.1:{}", port);
+        let tcp_listener = TcpListener::bind(&server_address).await?;
+        eprintln!("[redis] started server at {server_address}");
 
         Ok(Self {
             tcp_listener,
@@ -62,11 +64,11 @@ impl RedisServer {
         self.send_ping(&mut write_stream, &mut read_stream, &mut reader)
             .await?;
         self.send_replconf_port(&mut write_stream, &mut read_stream, &mut reader)
-        .await?;
+            .await?;
         self.send_replconf_capa(&mut write_stream, &mut read_stream, &mut reader)
-        .await?;
+            .await?;
         self.send_psync(&mut write_stream, &mut read_stream, &mut reader)
-        .await?;
+            .await?;
 
         Ok(())
     }
@@ -96,6 +98,7 @@ impl RedisServer {
         let ping = format!("{}", RESPBuilder::array().bulk("ping").build());
         write_stream.write(ping.as_bytes()).await?;
         let response = reader.read_value(read_stream).await;
+        dbg!(&response);
         match &response {
             Ok(RESPValue::SimpleString(s)) if s.to_ascii_lowercase() == "pong" => Ok(()),
             Ok(response) => Err(anyhow::anyhow!(

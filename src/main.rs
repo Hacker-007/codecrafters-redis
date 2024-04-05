@@ -1,7 +1,9 @@
+#![allow(unused)]
+
 mod redis;
 
 use bytes::BytesMut;
-use redis::{server::RedisServer, CommandPacket, Redis, RedisMode};
+use redis::{resp::RESPValueReader, server::RedisServer, CommandPacket, Redis, RedisMode};
 
 fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
     let mut args = std::env::args();
@@ -50,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
         anyhow::Ok(())
     });
-    
+
     let server = RedisServer::start(port, cloned_redis_mode).await?;
     server.run(tx).await
 }

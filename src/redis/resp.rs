@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, fmt::Display};
 
 use anyhow::Context;
-use bytes::BytesMut;
 use tokio::io::AsyncReadExt;
 
 macro_rules! try_parse {
@@ -46,14 +45,14 @@ impl Display for RESPValue {
 }
 
 pub struct RESPValueReader {
-    buf: BytesMut,
+    buf: Vec<u8>,
     cursor: usize,
 }
 
 impl RESPValueReader {
     pub fn new() -> Self {
         Self {
-            buf: BytesMut::with_capacity(8192),
+            buf: Vec::with_capacity(200),
             cursor: 0,
         }
     }
@@ -63,7 +62,13 @@ impl RESPValueReader {
         reader: &mut R,
     ) -> anyhow::Result<String> {
         loop {
-            let mut bytes = [0u8; 4096];
+            self.cursor = 0;
+            if let Some(value) = self.parse_rdb_file()? {
+                self.buf.drain(..self.cursor);
+                return Ok(value);
+            }
+
+            let mut bytes = [0u8; 200];
             let n = reader.read_buf(&mut &mut bytes[..]).await?;
             if n == 0 {
                 return Err(anyhow::anyhow!(
@@ -72,11 +77,6 @@ impl RESPValueReader {
             }
 
             self.buf.extend_from_slice(&bytes);
-            self.cursor = 0;
-            if let Some(value) = self.parse_rdb_file()? {
-                self.buf.clear();
-                return Ok(value);
-            }
         }
     }
 
@@ -85,7 +85,13 @@ impl RESPValueReader {
         reader: &mut R,
     ) -> anyhow::Result<RESPValue> {
         loop {
-            let mut bytes = [0u8; 4096];
+            self.cursor = 0;
+            if let Some(value) = self.parse()? {
+                self.buf.drain(..self.cursor);
+                return Ok(value);
+            }
+
+            let mut bytes = [0u8; 200];
             let n = reader.read_buf(&mut &mut bytes[..]).await?;
             if n == 0 {
                 return Err(anyhow::anyhow!(
@@ -94,11 +100,6 @@ impl RESPValueReader {
             }
 
             self.buf.extend_from_slice(&bytes);
-            self.cursor = 0;
-            if let Some(value) = self.parse()? {
-                self.buf.clear();
-                return Ok(value);
-            }
         }
     }
 
@@ -110,7 +111,8 @@ impl RESPValueReader {
             b'$' => self.parse_resp_bulk_string(),
             b'*' => self.parse_resp_array(),
             tag => Err(anyhow::anyhow!(
-                "[redis - error] unknown data tag '{tag}' found"
+                "[redis - error] unknown data tag '{}' found",
+                tag as char
             )),
         }
     }
@@ -227,6 +229,11 @@ impl RESPValueReader {
 
     fn advance(&mut self) -> Option<u8> {
         self.cursor += 1;
-        self.buf.get(self.cursor - 1).copied()
+        let byte = self.buf.get(self.cursor - 1).copied()?;
+        if byte == b'\0' {
+            None
+        } else {
+            Some(byte)
+        }
     }
 }
