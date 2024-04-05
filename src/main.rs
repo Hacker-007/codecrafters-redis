@@ -24,16 +24,16 @@ async fn main() -> anyhow::Result<()> {
     let redis_mode = parse_option("--replicaof", |mut args| {
         (
             args.next()
-                .expect("[redis - error] master host expected for replica"),
+                .expect("[redis - error] primary host expected for replica"),
             args.next()
-                .expect("[redis - error] master port expected for replic"),
+                .expect("[redis - error] primary port expected for replic"),
         )
     })
-    .map(|(host, port)| RedisMode::Slave {
-        master_host: host,
-        master_port: port,
+    .map(|(host, port)| RedisMode::Replica {
+        primary_host: host,
+        primary_port: port,
     })
-    .unwrap_or(RedisMode::Master {
+    .unwrap_or(RedisMode::Primary {
         replication_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
         replication_offset: 0,
     });
@@ -42,7 +42,11 @@ async fn main() -> anyhow::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     tokio::spawn(async move {
         let mut redis = Redis::new(redis_mode);
-        while let Some(CommandPacket { command, response_tx }) = rx.recv().await {
+        while let Some(CommandPacket {
+            command,
+            response_tx,
+        }) = rx.recv().await
+        {
             let mut output_sink = Vec::with_capacity(4096);
             redis.handle(command, &mut output_sink)?;
             if let Err(_) = response_tx.send(output_sink) {

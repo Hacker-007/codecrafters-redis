@@ -31,12 +31,12 @@ impl RedisServer {
     }
 
     pub async fn run(&self, tx: mpsc::Sender<CommandPacket>) -> anyhow::Result<()> {
-        if let RedisMode::Slave {
-            master_host,
-            master_port,
+        if let RedisMode::Replica {
+            primary_host,
+            primary_port,
         } = &self.mode
         {
-            self.connect_to_master(master_host, master_port, tx.clone())
+            self.connect_to_primary(primary_host, primary_port, tx.clone())
                 .await?;
         }
 
@@ -52,13 +52,13 @@ impl RedisServer {
         }
     }
 
-    async fn connect_to_master(
+    async fn connect_to_primary(
         &self,
-        master_host: &str,
-        master_port: &str,
+        primary_host: &str,
+        primary_port: &str,
         _tx: mpsc::Sender<CommandPacket>,
     ) -> anyhow::Result<()> {
-        let mut stream = TcpStream::connect(format!("{master_host}:{master_port}")).await?;
+        let mut stream = TcpStream::connect(format!("{primary_host}:{primary_port}")).await?;
         let (mut read_stream, mut write_stream) = stream.split();
         let mut reader = RESPValueReader::new();
         self.send_ping(&mut write_stream, &mut read_stream, &mut reader)
@@ -102,10 +102,10 @@ impl RedisServer {
         match &response {
             Ok(RESPValue::SimpleString(s)) if s.to_ascii_lowercase() == "pong" => Ok(()),
             Ok(response) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'PONG' from master but got '{response}'"
+                "[redis - error] expected simple-string encoded 'PONG' from primary but got '{response}'"
             )),
             Err(_) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'PONG' from master but got nothing"
+                "[redis - error] expected simple-string encoded 'PONG' from primary but got nothing"
             )),
         }
     }
@@ -129,10 +129,10 @@ impl RedisServer {
         match &response {
             Ok(RESPValue::SimpleString(s)) if s.to_ascii_lowercase() == "ok" => Ok(()),
             Ok(response) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'OK' from master but got '{response}'"
+                "[redis - error] expected simple-string encoded 'OK' from primary but got '{response}'"
             )),
             Err(_) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'OK' from master but got nothing"
+                "[redis - error] expected simple-string encoded 'OK' from primary but got nothing"
             )),
         }
     }
@@ -156,10 +156,10 @@ impl RedisServer {
         match &response {
             Ok(RESPValue::SimpleString(s)) if s.to_ascii_lowercase() == "ok" => Ok(()),
             Ok(response) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'OK' from master but got '{response}'"
+                "[redis - error] expected simple-string encoded 'OK' from primary but got '{response}'"
             )),
             Err(_) => Err(anyhow::anyhow!(
-                "[redis - error] expected simple-string encoded 'OK' from master but got nothing"
+                "[redis - error] expected simple-string encoded 'OK' from primary but got nothing"
             )),
         }
     }
@@ -181,18 +181,18 @@ impl RedisServer {
         write_stream.write(psync.as_bytes()).await?;
         let response = reader.read_value(read_stream).await;
         let Ok(RESPValue::SimpleString(response)) = response else {
-            return Err(anyhow::anyhow!("[redis - error] expected a simple-string encoded response from the master"))
+            return Err(anyhow::anyhow!("[redis - error] expected a simple-string encoded response from the primary"))
         };
 
-        if let Some(master_info) = response.strip_prefix("FULLRESYNC ") {
-            let mut master_info = master_info.split_ascii_whitespace();
-            let _replication_id = master_info.next().unwrap();
-            let _replication_offset = master_info.next().unwrap().parse::<usize>()?;
+        if let Some(primary_info) = response.strip_prefix("FULLRESYNC ") {
+            let mut primary_info = primary_info.split_ascii_whitespace();
+            let _replication_id = primary_info.next().unwrap();
+            let _replication_offset = primary_info.next().unwrap().parse::<usize>()?;
             let _rdb_file = reader.read_rdb_file(read_stream).await?;
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "[redis - error] expected 'FULLRESYNC' from master but got '{response}'"
+                "[redis - error] expected 'FULLRESYNC' from primary but got '{response}'"
             ))
         }
     }

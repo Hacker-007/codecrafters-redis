@@ -16,11 +16,11 @@ pub mod store;
 
 #[derive(Debug, Clone)]
 pub enum RedisMode {
-    Slave {
-        master_host: String,
-        master_port: String,
+    Replica {
+        primary_host: String,
+        primary_port: String,
     },
-    Master {
+    Primary {
         replication_id: String,
         replication_offset: usize,
     },
@@ -87,15 +87,16 @@ impl Redis {
 
     fn info(&mut self, section: InfoSection, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
         if section == InfoSection::Replication {
+            // "master" and "slave" language is unaviodable as Redis specification follows this naming.
             let info = match &self.mode {
-                RedisMode::Master {
+                RedisMode::Primary {
                     replication_id,
                     replication_offset,
                     ..
                 } => format!(
                     "role:master\nmaster_replid:{replication_id}\nmaster_repl_offset:{replication_offset}",
                 ),
-                RedisMode::Slave { .. } => "role:slave".to_string(),
+                RedisMode::Replica { .. } => "role:slave".to_string(),
             };
 
             write!(output_sink, "{}", RESPValue::BulkString(info))?;
@@ -153,7 +154,7 @@ impl Redis {
     }
 
     fn psync(&mut self, output_sink: &mut Vec<u8>) -> anyhow::Result<()> {
-        if let RedisMode::Master {
+        if let RedisMode::Primary {
             replication_id,
             replication_offset,
             ..
@@ -178,7 +179,7 @@ impl Redis {
             return Ok(());
         } else {
             Err(anyhow::anyhow!(
-                "[redis - error] Redis must be running in master mode to respond to 'PSYNC' command"
+                "[redis - error] Redis must be running in primary mode to respond to 'PSYNC' command"
             ))
         }
     }
