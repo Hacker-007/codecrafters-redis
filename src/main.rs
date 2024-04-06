@@ -1,9 +1,6 @@
-#![allow(unused)]
-
 mod redis;
 
-use bytes::BytesMut;
-use redis::{resp::RESPValueReader, server::RedisServer, CommandPacket, Redis, RedisMode};
+use redis::{server::RedisServer, CommandPacket, Redis, RedisMode};
 
 fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
     let mut args = std::env::args();

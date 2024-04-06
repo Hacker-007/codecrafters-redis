@@ -1,5 +1,4 @@
-use bytes::Bytes;
-use std::{fmt::Write, io::Write as IOWrite, ops::DerefMut, time::SystemTime};
+use std::{io::Write as IOWrite, time::SystemTime};
 use tokio::sync::oneshot;
 
 use self::{
