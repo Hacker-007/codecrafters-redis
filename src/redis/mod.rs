@@ -1,5 +1,6 @@
 mod resp_stream;
 mod resp;
+mod command;
 
 use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
