@@ -2,13 +2,13 @@ use std::time::{Duration, SystemTime};
 
 use super::resp::RESPValue;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InfoSection {
     Replication,
     Default,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RedisCommand {
     Ping,
     Echo {
@@ -32,8 +32,8 @@ pub enum RedisCommand {
         capabilities: Vec<Vec<u8>>,
     },
     PSync {
-        replication_id: Vec<u8>,
-        replication_offset: Vec<u8>,
+        replication_id: String,
+        replication_offset: String,
     },
 }
 
@@ -77,8 +77,7 @@ impl CommandParser {
         match self.parts.last() {
             Some(arg) if arg == arg_name.as_bytes() => {
                 self.parts.pop();
-                self.expect_arg(command_name, arg_name)
-                    .map(|bytes| Some(bytes))
+                self.expect_arg(command_name, arg_name).map(Some)
             }
             _ => Ok(None),
         }
@@ -94,11 +93,11 @@ impl TryFrom<RESPValue> for RedisCommand {
 
     fn try_from(value: RESPValue) -> Result<Self, Self::Error> {
         let command_parts = value
-            .to_array()
+            .into_array()
             .map(|values| {
                 values
                     .into_iter()
-                    .filter_map(|value| value.to_bulk_string())
+                    .filter_map(|value| value.into_bulk_string())
                     .collect::<Vec<_>>()
             })
             .ok_or_else(|| {
@@ -158,7 +157,9 @@ impl TryFrom<RESPValue> for RedisCommand {
             }
             b"psync" => {
                 let replication_id = parser.expect_arg("psync", "replication_id")?;
+                let replication_id = String::from_utf8(replication_id)?;
                 let replication_offset = parser.expect_arg("psync", "replication_offset")?;
+                let replication_offset = String::from_utf8(replication_offset)?;
                 Ok(RedisCommand::PSync {
                     replication_id,
                     replication_offset,
@@ -168,5 +169,19 @@ impl TryFrom<RESPValue> for RedisCommand {
                 "[redis - error] received an unknown command"
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::redis::{command::RedisCommand, resp_stream::RESPStream};
+
+    #[tokio::test]
+    async fn parses_ping() {
+        let mut stream = RESPStream::new("*1\r\n$4\r\nping\r\n".as_bytes());
+        let value = stream.read_value().await.unwrap();
+        let command: anyhow::Result<RedisCommand> = value.try_into();
+        assert!(command.is_ok());
+        assert_eq!(command.unwrap(), RedisCommand::Ping)
     }
 }

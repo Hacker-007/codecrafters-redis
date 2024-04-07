@@ -16,6 +16,7 @@ pub struct RESPStream<R> {
     inner: R,
     buf: Vec<u8>,
     cursor: usize,
+    is_closed: bool,
 }
 
 impl<R: AsyncRead + Unpin> RESPStream<R> {
@@ -24,7 +25,12 @@ impl<R: AsyncRead + Unpin> RESPStream<R> {
             inner,
             buf: Vec::with_capacity(4096),
             cursor: 0,
+            is_closed: false,
         }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.is_closed
     }
 
     pub async fn read_value(&mut self) -> anyhow::Result<RESPValue> {
@@ -37,6 +43,25 @@ impl<R: AsyncRead + Unpin> RESPStream<R> {
 
             let n = self.inner.read_buf(&mut self.buf).await?;
             if n == 0 {
+                self.is_closed = true;
+                return Err(anyhow::anyhow!(
+                    "[redis - error] client connection unexpectedly closed"
+                ));
+            }
+        }
+    }
+
+    pub async fn read_rdb_file(&mut self) -> anyhow::Result<Vec<u8>> {
+        loop {
+            self.cursor = 0;
+            if let Some(bytes) = self.try_parse_rdb()? {
+                self.buf.drain(..self.cursor);
+                return Ok(bytes);
+            }
+
+            let n = self.inner.read_buf(&mut self.buf).await?;
+            if n == 0 {
+                self.is_closed = true;
                 return Err(anyhow::anyhow!(
                     "[redis - error] client connection unexpectedly closed"
                 ));
@@ -117,6 +142,27 @@ impl<R: AsyncRead + Unpin> RESPStream<R> {
         }
 
         Ok(Some(RESPValue::Array(values)))
+    }
+
+    fn try_parse_rdb(&mut self) -> anyhow::Result<Option<Vec<u8>>> {
+        let byte = handle_eof!(self.advance());
+        if byte != b'$' {
+            return Err(anyhow::anyhow!("[redis - error] expected RDB file to start with '$'"))
+        }
+        
+        let length = handle_eof!(self.try_parse_number()?);
+        handle_eof!(self.try_parse_crlf()?);
+        if length < 0 {
+            return Err(anyhow::anyhow!("[redis - error] expected RDB file length to be a non-negative number"));
+        }
+        
+        if self.buf.get(self.cursor + length as usize - 1).is_none() {
+            return Ok(None);
+        }
+
+        let bytes = self.buf[self.cursor..self.cursor + length as usize].to_vec();
+        self.cursor += length as usize;
+        Ok(Some(bytes))
     }
 
     fn try_parse_number(&mut self) -> anyhow::Result<Option<i64>> {
@@ -256,9 +302,15 @@ mod tests {
         let mut stream =
             RESPStream::new("*1\r\n:123\r\n*2\r\n:123\r\n:456\r\n*0\r\n*-1\r\n".as_bytes());
         let value = stream.read_value().await;
-        assert_eq!(value.unwrap(), RESPValue::Array(vec![RESPValue::Integer(123)]));
+        assert_eq!(
+            value.unwrap(),
+            RESPValue::Array(vec![RESPValue::Integer(123)])
+        );
         let value = stream.read_value().await;
-        assert_eq!(value.unwrap(), RESPValue::Array(vec![RESPValue::Integer(123), RESPValue::Integer(456)]));
+        assert_eq!(
+            value.unwrap(),
+            RESPValue::Array(vec![RESPValue::Integer(123), RESPValue::Integer(456)])
+        );
         let value = stream.read_value().await;
         assert_eq!(value.unwrap(), RESPValue::Array(vec![]));
         let value = stream.read_value().await;
