@@ -1,3 +1,5 @@
+mod redis;
+
 fn parse_option<T>(option_name: &str, option_parser: impl Fn(std::env::Args) -> T) -> Option<T> {
     let mut args = std::env::args();
     args.find(|arg_name| arg_name == option_name)
@@ -22,6 +24,6 @@ async fn main() -> anyhow::Result<()> {
                 .expect("[redis - error] primary port expected for replic"),
         )
     });
-
+    
     Ok(())
 }
