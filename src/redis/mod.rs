@@ -1,5 +1,4 @@
-mod command;
+pub mod manager;
 mod resp;
-mod resp_stream;
-pub mod server;
+mod server;
 pub mod store;

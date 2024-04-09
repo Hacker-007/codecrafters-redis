@@ -18,36 +18,36 @@ pub struct RedisCommandPacket {
     write_stream: RedisWriteStream,
 }
 
-async fn process_stream(
-    mut read_stream: RedisReadStream,
-    write_stream: RedisWriteStream,
-    command_tx: mpsc::Sender<RedisCommandPacket>,
-) -> anyhow::Result<()> {
-    loop {
-        match read_stream.read().await {
-            Ok(Some(command)) => {
-                command_tx
-                    .send(RedisCommandPacket {
-                        command,
-                        write_stream: write_stream.clone(),
-                    })
-                    .await?;
-            }
-            Ok(None) => return Ok(()),
-            Err(err) => return Err(err),
-        }
-    }
+#[derive(Debug)]
+pub enum RedisReplicationMode {
+    Primary {
+        replication_id: String,
+        replication_offset: u64,
+    },
+    Replica {
+        primary_host: String,
+        primary_port: u16,
+    },
 }
 
 #[derive(Debug)]
 pub struct RedisManager {
     store: RedisStore,
+    replication_mode: RedisReplicationMode,
     address: SocketAddr,
 }
 
 impl RedisManager {
-    pub fn manage(store: RedisStore, address: SocketAddr) -> Self {
-        Self { store, address }
+    pub fn manage(
+        store: RedisStore,
+        replication_mode: RedisReplicationMode,
+        address: SocketAddr,
+    ) -> Self {
+        Self {
+            store,
+            replication_mode,
+            address,
+        }
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -102,10 +102,16 @@ impl RedisManager {
     ) -> anyhow::Result<()> {
         match section {
             InfoSection::Default | InfoSection::Replication => {
-                let response = format!(
-                    "role:master\nmaster_replid:{}\nmaster_repl_offset:{}",
-                    "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb", 0
-                );
+                let response = match &self.replication_mode {
+                    RedisReplicationMode::Primary {
+                        replication_id,
+                        replication_offset,
+                    } => format!(
+                        "role:master\nmaster_replid:{}\nmaster_repl_offset:{}",
+                        replication_id, replication_offset
+                    ),
+                    RedisReplicationMode::Replica { .. } => "role:slave".to_string(),
+                };
 
                 let response = RESPValue::BulkString(Bytes::copy_from_slice(response.as_bytes()));
                 write_stream.write(Bytes::from(response)).await
@@ -124,10 +130,10 @@ impl RedisManager {
                 eprintln!("[redis] client at {address} connected");
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
-                    if process_stream(read_stream, write_stream, command_tx)
-                        .await
-                        .is_err()
+                    if let Err(err) =
+                        Self::process_stream(read_stream, write_stream, command_tx).await
                     {
+                        eprintln!("{err}");
                         eprintln!(
                             "[redis - error] an unknown error occurred when processing client stream"
                         )
@@ -140,5 +146,26 @@ impl RedisManager {
             #[allow(unreachable_code)]
             anyhow::Ok(())
         });
+    }
+
+    async fn process_stream(
+        mut read_stream: RedisReadStream,
+        write_stream: RedisWriteStream,
+        command_tx: mpsc::Sender<RedisCommandPacket>,
+    ) -> anyhow::Result<()> {
+        loop {
+            match read_stream.read().await {
+                Ok(Some(command)) => {
+                    command_tx
+                        .send(RedisCommandPacket {
+                            command,
+                            write_stream: write_stream.clone(),
+                        })
+                        .await?;
+                }
+                Ok(None) => return Ok(()),
+                Err(err) => return Err(err),
+            }
+        }
     }
 }

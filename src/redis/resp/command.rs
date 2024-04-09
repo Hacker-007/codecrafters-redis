@@ -114,7 +114,8 @@ impl TryFrom<RESPValue> for RedisCommand {
         }
 
         let mut parser = CommandParser::new(command_parts);
-        match &*parser.parse_next() {
+        let command_name = parser.parse_next().to_ascii_lowercase();
+        match &*command_name {
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser
                 .expect_arg("echo", "echo")
@@ -174,8 +175,9 @@ impl TryFrom<RESPValue> for RedisCommand {
                     replication_offset,
                 }))
             }
-            _ => Err(anyhow::anyhow!(
-                "[redis - error] received an unknown command"
+            bytes => Err(anyhow::anyhow!(
+                "[redis - error] received an unprocessable command '{}'",
+                std::str::from_utf8(bytes).unwrap_or("unknown")
             )),
         }
     }
