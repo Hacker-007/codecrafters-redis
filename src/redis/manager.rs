@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use crate::redis::resp::{
-    command::{InfoSection, RedisCommand, RedisServerCommand},
+    command::{InfoSection, RedisCommand, RedisServerCommand, ReplConfSection},
     RESPValue,
 };
 
@@ -96,12 +96,15 @@ impl RedisManager {
                 RedisCommand::Server(RedisServerCommand::Info { section }) => {
                     self.info(section, write_stream).await?
                 }
-                RedisCommand::Server(RedisServerCommand::ReplConfPort { .. }) => {
-                    self.repl_conf_port(write_stream).await?
-                }
-                RedisCommand::Server(RedisServerCommand::ReplConfCapa { .. }) => {
-                    self.repl_conf_capa(write_stream).await?
-                }
+                RedisCommand::Server(RedisServerCommand::ReplConf {
+                    section: ReplConfSection::Port { .. },
+                }) => self.repl_conf_port(write_stream).await?,
+                RedisCommand::Server(RedisServerCommand::ReplConf {
+                    section: ReplConfSection::Capa { .. },
+                }) => self.repl_conf_capa(write_stream).await?,
+                RedisCommand::Server(RedisServerCommand::ReplConf {
+                    section: ReplConfSection::GetAck,
+                }) => self.getack(write_stream).await?,
                 RedisCommand::Server(RedisServerCommand::PSync { .. }) => {
                     self.psync(write_stream.clone()).await?;
                     if let RedisReplicationMode::Primary { replicas, .. } =
@@ -121,11 +124,7 @@ impl RedisManager {
         write_stream.write(Bytes::from(response)).await
     }
 
-    async fn echo(
-        &mut self,
-        echo: Bytes,
-        write_stream: RedisWriteStream,
-    ) -> anyhow::Result<()> {
+    async fn echo(&mut self, echo: Bytes, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         let response = RESPValue::BulkString(echo);
         write_stream.write(Bytes::from(response)).await
     }
@@ -188,6 +187,17 @@ impl RedisManager {
                 "[redis - error] Redis must be running in primary mode to respond to 'PSYNC' command"
             ))
         }
+    }
+
+    async fn getack(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        let value = RESPValue::Array(vec![
+            RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
+            RESPValue::BulkString(Bytes::from_static(b"ACK")),
+            RESPValue::BulkString(Bytes::from_static(b"0")),
+        ]);
+
+        let bytes = Bytes::from(value);
+        write_stream.write(bytes).await
     }
 }
 
@@ -354,9 +364,11 @@ impl RedisManager {
                 let (write_tx, mut write_rx) = mpsc::channel::<Bytes>(32);
                 let write_stream = RedisWriteStream::new(write_tx);
                 tokio::spawn(async move {
-                    while let Some(_) = write_rx.recv().await {
-                        // NOTE: replica should not respond to replicated commands sent by primary
+                    while let Some(bytes) = write_rx.recv().await {
+                        write_half.write(&bytes).await?;
                     }
+
+                    anyhow::Ok(())
                 });
 
                 loop {
@@ -365,10 +377,21 @@ impl RedisManager {
                         .await
                         .and_then(|value| value.try_into())
                         .context("[redis - error] unable to parse RESP value into command")?;
+                    
+                    let mut write_stream = write_stream.clone();
+                    // NOTE: replica should not respond to all replicated commands sent by primary
+                    if !matches!(
+                        command,
+                        RedisCommand::Server(RedisServerCommand::ReplConf {
+                            section: ReplConfSection::GetAck
+                        })
+                    ) {
+                        write_stream.close();
+                    }
 
                     let packet = RedisCommandPacket {
                         command,
-                        write_stream: write_stream.clone(),
+                        write_stream,
                     };
 
                     if read_half.is_closed() || command_tx.send(packet).await.is_err() {

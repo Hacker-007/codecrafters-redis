@@ -27,18 +27,28 @@ impl RedisReadStream {
 }
 
 #[derive(Clone)]
-pub struct RedisWriteStream(mpsc::Sender<Bytes>);
+pub struct RedisWriteStream {
+    should_send: bool,
+    tx: mpsc::Sender<Bytes>,
+}
 
 impl RedisWriteStream {
     pub fn new(tx: mpsc::Sender<Bytes>) -> Self {
-        Self(tx)
+        Self { should_send: true, tx }
     }
 }
 
 impl RedisWriteStream {
     pub async fn write(&self, bytes: impl Into<Bytes>) -> anyhow::Result<()> {
-        self.0.send(bytes.into()).await?;
+        if self.should_send {
+            self.tx.send(bytes.into()).await?;
+        }
+
         Ok(())
+    }
+
+    pub fn close(&mut self) {
+        self.should_send = false;
     }
 }
 
@@ -79,7 +89,7 @@ impl RedisServer {
 
         Ok((
             RedisReadStream(read_rx),
-            RedisWriteStream(write_tx),
+            RedisWriteStream::new(write_tx),
             address,
         ))
     }

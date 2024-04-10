@@ -10,6 +10,13 @@ pub enum InfoSection {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ReplConfSection {
+    Port { listening_port: u16 },
+    Capa { capabilities: Vec<Bytes> },
+    GetAck,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
     Echo {
@@ -18,11 +25,8 @@ pub enum RedisServerCommand {
     Info {
         section: InfoSection,
     },
-    ReplConfPort {
-        listening_port: u64,
-    },
-    ReplConfCapa {
-        capabilities: Vec<Bytes>,
+    ReplConf {
+        section: ReplConfSection,
     },
     PSync {
         replication_id: String,
@@ -96,8 +100,8 @@ impl CommandParser {
         Self { parts }
     }
 
-    fn parse_next(&mut self) -> Bytes {
-        self.parts.pop().unwrap()
+    fn parse_next(&mut self) -> Option<Bytes> {
+        self.parts.pop()
     }
 
     fn expect_arg(&mut self, command_name: &str, arg_name: &str) -> anyhow::Result<Bytes> {
@@ -110,17 +114,13 @@ impl CommandParser {
         }
     }
 
-    fn attempt_named_arg(
-        &mut self,
-        command_name: &str,
-        arg_name: &str,
-    ) -> anyhow::Result<Option<Bytes>> {
+    fn attempt_named_arg(&mut self, command_name: &str, arg_name: &str) -> Option<Bytes> {
         match self.parts.last() {
             Some(arg) if arg == arg_name.as_bytes() => {
                 self.parts.pop();
-                self.expect_arg(command_name, arg_name).map(Some)
+                self.expect_arg(command_name, arg_name).ok()
             }
-            _ => Ok(None),
+            _ => None,
         }
     }
 
@@ -152,7 +152,7 @@ impl TryFrom<RESPValue> for RedisCommand {
         }
 
         let mut parser = CommandParser::new(command_parts);
-        let command_name = parser.parse_next().to_ascii_lowercase();
+        let command_name = parser.parse_next().unwrap().to_ascii_lowercase();
         match &*command_name {
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser
@@ -173,7 +173,7 @@ impl TryFrom<RESPValue> for RedisCommand {
                 let key = parser.expect_arg("set", "key")?;
                 let value = parser.expect_arg("set", "value")?;
                 let px = parser
-                    .attempt_named_arg("set", "px")?
+                    .attempt_named_arg("set", "px")
                     .and_then(|millis| String::from_utf8(millis.to_vec()).ok())
                     .and_then(|millis| millis.parse::<u64>().ok())
                     .map(Duration::from_millis)
@@ -186,21 +186,43 @@ impl TryFrom<RESPValue> for RedisCommand {
                 }))
             }
             b"replconf" => {
-                if let Some(port) = parser.attempt_named_arg("replconf", "listening-port")? {
-                    let port = std::str::from_utf8(&port)?;
-                    let port = port.parse::<u64>()?;
-                    return Ok(RedisCommand::Server(RedisServerCommand::ReplConfPort {
-                        listening_port: port,
-                    }));
-                }
+                let section = match parser
+                    .parse_next()
+                    .map(|section| section.to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some(b"listening-port") => {
+                        let port = parser.parse_next().ok_or_else(|| anyhow::anyhow!("[redis - error] expected value for argument 'listening-port' for command 'replconf'"))?;
+                        let port = std::str::from_utf8(&port)?;
+                        let port = port.parse::<u16>()?;
+                        ReplConfSection::Port {
+                            listening_port: port,
+                        }
+                    }
+                    Some(b"capa") => {
+                        let mut capabilities = vec![];
+                        while let Some(capability) = parser.parse_next() {
+                            capabilities.push(capability);
+                        }
 
-                let mut capabilities = vec![];
-                while let Some(capability) = parser.attempt_named_arg("replconf", "capa")? {
-                    capabilities.push(capability);
-                }
+                        ReplConfSection::Capa { capabilities }
+                    }
+                    Some(b"getack") => {
+                        if let Some(b"*") = parser.parse_next().as_deref() {
+                            ReplConfSection::GetAck
+                        } else {
+                            return Err(anyhow::anyhow!("[redis - error] unexpected section for argument 'getack' for command 'replconf'"));
+                        }
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "[redis - error] unknown argument found for command 'replconf'"
+                        ))
+                    }
+                };
 
-                Ok(RedisCommand::Server(RedisServerCommand::ReplConfCapa {
-                    capabilities,
+                Ok(RedisCommand::Server(RedisServerCommand::ReplConf {
+                    section,
                 }))
             }
             b"psync" => {
