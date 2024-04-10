@@ -58,9 +58,9 @@ impl RedisStoreCommand {
     }
 }
 
-impl Into<RESPValue> for RedisStoreCommand {
-    fn into(self) -> RESPValue {
-        match self {
+impl From<RedisStoreCommand> for RESPValue {
+    fn from(command: RedisStoreCommand) -> Self {
+        match command {
             RedisStoreCommand::Get { key } => RESPValue::Array(vec![
                 RESPValue::BulkString(Bytes::from_static(b"GET")),
                 RESPValue::BulkString(key),

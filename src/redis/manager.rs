@@ -365,7 +365,7 @@ impl RedisManager {
                 let write_stream = RedisWriteStream::new(write_tx);
                 tokio::spawn(async move {
                     while let Some(bytes) = write_rx.recv().await {
-                        write_half.write(&bytes).await?;
+                        write_half.write_all(&bytes).await?;
                     }
 
                     anyhow::Ok(())

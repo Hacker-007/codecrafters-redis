@@ -94,8 +94,7 @@ impl<R: AsyncRead + Unpin> RESPReader<R> {
             .unwrap();
 
         self.parse_crlf();
-        let bytes = self.buf.copy_to_bytes(length as usize);
-        bytes
+        self.buf.copy_to_bytes(length as usize)
     }
 
     pub async fn read_value(&mut self) -> anyhow::Result<RESPValue> {
