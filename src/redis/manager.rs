@@ -179,9 +179,8 @@ impl RedisManager {
                 .collect::<Result<Bytes, _>>()?;
 
             let mut bytes = BytesMut::new();
-            bytes.put_u8(b'$');
-            bytes.extend_from_slice(rdb_file.len().to_string().as_bytes());
-            bytes.extend_from_slice(b"\r\n");
+            let prefix = format!("${}\r\n", rdb_file.len());
+            bytes.extend_from_slice(prefix.as_bytes());
             bytes.extend_from_slice(&rdb_file);
             write_stream.write(bytes).await
         } else {

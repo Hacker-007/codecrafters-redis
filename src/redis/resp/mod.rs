@@ -52,9 +52,8 @@ impl From<RESPValue> for Bytes {
                 output.extend_from_slice(b"\r\n");
             }
             RESPValue::BulkString(bytes) => {
-                output.put_u8(b'$');
-                output.extend_from_slice(bytes.len().to_string().as_bytes());
-                output.extend_from_slice(b"\r\n");
+                let prefix = format!("${}\r\n", bytes.len());
+                output.extend_from_slice(prefix.as_bytes());
                 output.extend_from_slice(&bytes);
                 output.extend_from_slice(b"\r\n");
             }
