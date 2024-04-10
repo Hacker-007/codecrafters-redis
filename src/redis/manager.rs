@@ -115,6 +115,9 @@ impl RedisManager {
                         replicas.push(write_stream)
                     }
                 }
+                RedisCommand::Server(RedisServerCommand::Wait { num_replicas, timeout }) => {
+                    self.wait(*num_replicas, *timeout, write_stream).await?;
+                }
             }
 
             if let RedisReplicationMode::Replica {
@@ -217,6 +220,15 @@ impl RedisManager {
             write_stream.write(bytes).await
         } else {
             Err(anyhow::anyhow!("[redis - error] Redis must be running as a replica to respond to 'replconf getack' command"))
+        }
+    }
+
+    async fn wait(&mut self, _num_replicas: usize, _timeout: usize, write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
+            let replica_count = format!(":{}\r\n", replicas.len());    
+            write_stream.write(Bytes::copy_from_slice(replica_count.as_bytes())).await
+        } else {
+            Err(anyhow::anyhow!("[redis - error] Redis must be running in primary mode to respond to 'WAIT' command"))
         }
     }
 }
