@@ -379,7 +379,7 @@ impl RedisManager {
                         .context("[redis - error] unable to parse RESP value into command")?;
                     
                     let mut write_stream = write_stream.clone();
-                    // NOTE: replica should not respond to all replicated commands sent by primary
+                    // NOTE: replica should only respond to 'getack' command sent by primary
                     if !matches!(
                         command,
                         RedisCommand::Server(RedisServerCommand::ReplConf {
