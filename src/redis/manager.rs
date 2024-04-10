@@ -38,6 +38,7 @@ pub enum RedisReplicationMode {
     Replica {
         primary_host: String,
         primary_port: u16,
+        processed_bytes: usize,
     },
 }
 
@@ -65,6 +66,7 @@ impl RedisManager {
         if let RedisReplicationMode::Replica {
             primary_host,
             primary_port,
+            ..
         } = &self.replication_mode
         {
             self.complete_handshake(
@@ -82,19 +84,19 @@ impl RedisManager {
             write_stream,
         }) = command_rx.recv().await
         {
-            match command {
+            match &command {
                 RedisCommand::Store(command) => {
                     let mut output = BytesMut::with_capacity(2048).writer();
-                    self.store.handle(command.clone(), &mut output)?;
+                    self.store.handle(command, &mut output)?;
                     write_stream.write(output.into_inner().freeze()).await?;
                     self.try_replicate(command).await?;
                 }
                 RedisCommand::Server(RedisServerCommand::Ping) => self.ping(write_stream).await?,
                 RedisCommand::Server(RedisServerCommand::Echo { echo }) => {
-                    self.echo(echo, write_stream).await?
+                    self.echo(echo.clone(), write_stream).await?
                 }
                 RedisCommand::Server(RedisServerCommand::Info { section }) => {
-                    self.info(section, write_stream).await?
+                    self.info(*section, write_stream).await?
                 }
                 RedisCommand::Server(RedisServerCommand::ReplConf {
                     section: ReplConfSection::Port { .. },
@@ -113,6 +115,15 @@ impl RedisManager {
                         replicas.push(write_stream)
                     }
                 }
+            }
+
+            if let RedisReplicationMode::Replica {
+                processed_bytes, ..
+            } = &mut self.replication_mode
+            {
+                let value = RESPValue::from(&command);
+                let bytes = Bytes::from(value);
+                *processed_bytes += bytes.len();
             }
         }
 
@@ -190,14 +201,23 @@ impl RedisManager {
     }
 
     async fn getack(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
-        let value = RESPValue::Array(vec![
-            RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
-            RESPValue::BulkString(Bytes::from_static(b"ACK")),
-            RESPValue::BulkString(Bytes::from_static(b"0")),
-        ]);
+        if let RedisReplicationMode::Replica {
+            processed_bytes, ..
+        } = &self.replication_mode
+        {
+            let value = RESPValue::Array(vec![
+                RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
+                RESPValue::BulkString(Bytes::from_static(b"ACK")),
+                RESPValue::BulkString(Bytes::copy_from_slice(
+                    processed_bytes.to_string().as_bytes(),
+                )),
+            ]);
 
-        let bytes = Bytes::from(value);
-        write_stream.write(bytes).await
+            let bytes = Bytes::from(value);
+            write_stream.write(bytes).await
+        } else {
+            Err(anyhow::anyhow!("[redis - error] Redis must be running as a replica to respond to 'replconf getack' command"))
+        }
     }
 }
 
@@ -377,7 +397,7 @@ impl RedisManager {
                         .await
                         .and_then(|value| value.try_into())
                         .context("[redis - error] unable to parse RESP value into command")?;
-                    
+
                     let mut write_stream = write_stream.clone();
                     // NOTE: replica should only respond to 'getack' command sent by primary
                     if !matches!(
@@ -412,7 +432,7 @@ impl RedisManager {
 }
 
 impl RedisManager {
-    async fn try_replicate(&self, command: RedisStoreCommand) -> anyhow::Result<()> {
+    async fn try_replicate(&self, command: &RedisStoreCommand) -> anyhow::Result<()> {
         if command.is_write() {
             if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
                 let value: RESPValue = command.into();

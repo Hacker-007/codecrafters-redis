@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         RedisReplicationMode::Replica {
             primary_host,
             primary_port,
+            processed_bytes: 0,
         }
     } else {
         RedisReplicationMode::Primary {
