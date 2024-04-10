@@ -32,6 +32,10 @@ pub enum RedisServerCommand {
         replication_id: String,
         replication_offset: i64,
     },
+    Wait {
+        num_replicas: usize,
+        timeout: usize,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -125,6 +129,14 @@ impl From<&RedisServerCommand> for RESPValue {
                 RESPValue::BulkString(Bytes::copy_from_slice(
                     replication_offset.to_string().as_bytes(),
                 )),
+            ]),
+            RedisServerCommand::Wait {
+                num_replicas,
+                timeout,
+            } => RESPValue::Array(vec![
+                RESPValue::BulkString(Bytes::from_static(b"WAIT")),
+                RESPValue::BulkString(Bytes::copy_from_slice(num_replicas.to_string().as_bytes())),
+                RESPValue::BulkString(Bytes::copy_from_slice(timeout.to_string().as_bytes())),
             ]),
         }
     }
@@ -305,6 +317,16 @@ impl TryFrom<RESPValue> for RedisCommand {
                 Ok(RedisCommand::Server(RedisServerCommand::PSync {
                     replication_id,
                     replication_offset,
+                }))
+            }
+            b"wait" => {
+                let num_replicas = parser.expect_arg("wait", "num_replicas")?;
+                let num_replicas = std::str::from_utf8(&num_replicas)?.parse()?;
+                let timeout = parser.expect_arg("wait", "timeout")?;
+                let timeout = std::str::from_utf8(&timeout)?.parse()?;
+                Ok(RedisCommand::Server(RedisServerCommand::Wait {
+                    num_replicas,
+                    timeout,
                 }))
             }
             bytes => Err(anyhow::anyhow!(
