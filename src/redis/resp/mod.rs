@@ -62,6 +62,9 @@ impl From<RESPValue> for Bytes {
                 output.extend_from_slice(b"$-1\r\n");
             }
             RESPValue::Array(values) => {
+                output.put_u8(b'*');
+                output.extend_from_slice(values.len().to_string().as_bytes());
+                output.extend_from_slice(b"\r\n");
                 values
                     .into_iter()
                     .map(Bytes::from)

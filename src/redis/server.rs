@@ -30,6 +30,12 @@ impl RedisReadStream {
 pub struct RedisWriteStream(mpsc::Sender<Bytes>);
 
 impl RedisWriteStream {
+    pub fn new(tx: mpsc::Sender<Bytes>) -> Self {
+        Self(tx)
+    }
+}
+
+impl RedisWriteStream {
     pub async fn write(&mut self, bytes: impl Into<Bytes>) -> anyhow::Result<()> {
         self.0.send(bytes.into()).await?;
         Ok(())
@@ -50,7 +56,6 @@ impl RedisServer {
         let mut read_half = RESPReader::new(read_half);
         let (read_tx, read_rx) = mpsc::channel(32);
         let (write_tx, mut write_rx) = mpsc::channel::<Bytes>(32);
-
         tokio::spawn(async move {
             loop {
                 let command = read_half
@@ -66,7 +71,7 @@ impl RedisServer {
 
         tokio::spawn(async move {
             while let Some(bytes) = write_rx.recv().await {
-                if write_half.write_all(&*bytes).await.is_err() {
+                if write_half.write_all(&bytes).await.is_err() {
                     break;
                 }
             }

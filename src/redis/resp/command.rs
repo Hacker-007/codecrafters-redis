@@ -3,13 +3,13 @@ use std::time::{Duration, SystemTime};
 
 use super::RESPValue;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InfoSection {
     Replication,
     Default,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
     Echo {
@@ -26,11 +26,11 @@ pub enum RedisServerCommand {
     },
     PSync {
         replication_id: String,
-        replication_offset: usize,
+        replication_offset: i64,
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisStoreCommand {
     Get {
         key: Bytes,
@@ -42,10 +42,48 @@ pub enum RedisStoreCommand {
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisCommand {
     Server(RedisServerCommand),
     Store(RedisStoreCommand),
+}
+
+impl RedisStoreCommand {
+    pub fn is_write(&self) -> bool {
+        matches!(self, Self::Set { .. })
+    }
+}
+
+impl Into<RESPValue> for RedisStoreCommand {
+    fn into(self) -> RESPValue {
+        match self {
+            RedisStoreCommand::Get { key } => RESPValue::Array(vec![
+                RESPValue::BulkString(Bytes::from_static(b"GET")),
+                RESPValue::BulkString(key),
+            ]),
+            RedisStoreCommand::Set { key, value, px } => {
+                let mut command = vec![
+                    RESPValue::BulkString(Bytes::from_static(b"SET")),
+                    RESPValue::BulkString(key),
+                    RESPValue::BulkString(value),
+                ];
+
+                if let Some(px) = px {
+                    let difference = match px.elapsed() {
+                        Ok(duration) => duration,
+                        Err(err) => err.duration(),
+                    };
+
+                    command.push(RESPValue::BulkString(Bytes::from_static(b"SET")));
+                    command.push(RESPValue::BulkString(Bytes::copy_from_slice(
+                        difference.as_millis().to_string().as_bytes(),
+                    )));
+                }
+
+                RESPValue::Array(command)
+            }
+        }
+    }
 }
 
 struct CommandParser {

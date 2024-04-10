@@ -42,10 +42,66 @@ impl<R: AsyncRead + Unpin> RESPReader<R> {
         self.is_closed
     }
 
+    pub async fn read_rdb_file(&mut self) -> anyhow::Result<Bytes> {
+        loop {
+            self.cursor = 0;
+            if self.check_rdb_file()? {
+                let bytes = self.parse_rdb_file();
+                return Ok(bytes);
+            }
+
+            let n = self.inner.read_buf(&mut self.buf).await?;
+            if n == 0 {
+                self.is_closed = true;
+                return Err(anyhow::anyhow!(
+                    "[redis - error] client connection unexpectedly closed"
+                ));
+            }
+        }
+    }
+
+    fn check_rdb_file(&mut self) -> anyhow::Result<bool> {
+        let data_tag = handle_eof!(self.check_advance());
+        if data_tag != b'$' {
+            return Err(anyhow::anyhow!(
+                "[redis - error] unexpected data tag '{}' found for RDB file",
+                data_tag.escape_ascii().to_string()
+            ));
+        }
+
+        let start = self.cursor;
+        check_eof!(self.check_read_until(|byte| !byte.is_ascii_digit())?);
+        let length = std::str::from_utf8(&self.buf[start..self.cursor])
+            .context("[redis - error] expected length of RDB file to be a valid number")?
+            .parse::<usize>()
+            .context("[redis - error] expected length of RDB file to be a valid number")?;
+
+        check_eof!(self.check_crlf()?);
+        if self.buf.get(self.cursor + length as usize - 1).is_none() {
+            return Ok(false);
+        }
+
+        self.cursor += length as usize;
+        Ok(true)
+    }
+
+    fn parse_rdb_file(&mut self) -> Bytes {
+        self.buf.advance(1);
+        let length = self.read_until(|byte| !byte.is_ascii_digit());
+        let length = std::str::from_utf8(&length)
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+
+        self.parse_crlf();
+        let bytes = self.buf.copy_to_bytes(length as usize);
+        bytes
+    }
+
     pub async fn read_value(&mut self) -> anyhow::Result<RESPValue> {
         loop {
             self.cursor = 0;
-            if self.check()? {
+            if !self.buf.is_empty() && self.check()? {
                 let value = self.parse();
                 return Ok(value);
             }

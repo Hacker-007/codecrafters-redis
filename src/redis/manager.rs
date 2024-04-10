@@ -1,7 +1,15 @@
 use std::net::SocketAddr;
 
+use anyhow::Context;
 use bytes::{BufMut, Bytes, BytesMut};
-use tokio::sync::mpsc;
+use tokio::{
+    io::AsyncWriteExt,
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream, ToSocketAddrs,
+    },
+    sync::mpsc,
+};
 
 use crate::redis::resp::{
     command::{InfoSection, RedisCommand, RedisServerCommand},
@@ -9,20 +17,23 @@ use crate::redis::resp::{
 };
 
 use super::{
+    resp::{command::RedisStoreCommand, resp_reader::RESPReader},
     server::{RedisReadStream, RedisServer, RedisWriteStream},
     store::RedisStore,
 };
+
+const EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
 pub struct RedisCommandPacket {
     command: RedisCommand,
     write_stream: RedisWriteStream,
 }
 
-#[derive(Debug)]
 pub enum RedisReplicationMode {
     Primary {
         replication_id: String,
         replication_offset: u64,
+        replicas: Vec<RedisWriteStream>,
     },
     Replica {
         primary_host: String,
@@ -30,7 +41,6 @@ pub enum RedisReplicationMode {
     },
 }
 
-#[derive(Debug)]
 pub struct RedisManager {
     store: RedisStore,
     replication_mode: RedisReplicationMode,
@@ -51,10 +61,21 @@ impl RedisManager {
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
+        let (command_tx, mut command_rx) = mpsc::channel(32);
+        if let RedisReplicationMode::Replica {
+            primary_host,
+            primary_port,
+        } = &self.replication_mode
+        {
+            self.complete_handshake(
+                (primary_host.to_string(), *primary_port),
+                command_tx.clone(),
+            )
+            .await?;
+        }
+
         let server = RedisServer::start(self.address).await?;
         eprintln!("[redis] server started at {}", self.address);
-
-        let (command_tx, mut command_rx) = mpsc::channel(32);
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
             command,
@@ -64,8 +85,9 @@ impl RedisManager {
             match command {
                 RedisCommand::Store(command) => {
                     let mut output = BytesMut::with_capacity(2048).writer();
-                    self.store.handle(command, &mut output)?;
+                    self.store.handle(command.clone(), &mut output)?;
                     write_stream.write(output.into_inner().freeze()).await?;
+                    self.try_replicate(command).await?;
                 }
                 RedisCommand::Server(RedisServerCommand::Ping) => self.ping(write_stream).await?,
                 RedisCommand::Server(RedisServerCommand::Echo { echo }) => {
@@ -74,7 +96,20 @@ impl RedisManager {
                 RedisCommand::Server(RedisServerCommand::Info { section }) => {
                     self.info(section, write_stream).await?
                 }
-                _ => todo!(),
+                RedisCommand::Server(RedisServerCommand::ReplConfPort { .. }) => {
+                    self.repl_conf_port(write_stream).await?
+                }
+                RedisCommand::Server(RedisServerCommand::ReplConfCapa { .. }) => {
+                    self.repl_conf_capa(write_stream).await?
+                }
+                RedisCommand::Server(RedisServerCommand::PSync { .. }) => {
+                    self.psync(write_stream.clone()).await?;
+                    if let RedisReplicationMode::Primary { replicas, .. } =
+                        &mut self.replication_mode
+                    {
+                        replicas.push(write_stream)
+                    }
+                }
             }
         }
 
@@ -106,6 +141,7 @@ impl RedisManager {
                     RedisReplicationMode::Primary {
                         replication_id,
                         replication_offset,
+                        ..
                     } => format!(
                         "role:master\nmaster_replid:{}\nmaster_repl_offset:{}",
                         replication_id, replication_offset
@@ -119,6 +155,44 @@ impl RedisManager {
         }
     }
 
+    async fn repl_conf_port(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        write_stream.write(Bytes::from_static(b"+OK\r\n")).await
+    }
+
+    async fn repl_conf_capa(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        write_stream.write(Bytes::from_static(b"+OK\r\n")).await
+    }
+
+    async fn psync(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        if let RedisReplicationMode::Primary {
+            replication_id,
+            replication_offset,
+            ..
+        } = &self.replication_mode
+        {
+            let resync = format!("+FULLRESYNC {} {}\r\n", replication_id, *replication_offset);
+            let bytes = Bytes::copy_from_slice(resync.as_bytes());
+            write_stream.write(bytes).await?;
+            let rdb_file = (0..EMPTY_RDB_HEX.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&EMPTY_RDB_HEX[i..i + 2], 16))
+                .collect::<Result<Bytes, _>>()?;
+
+            let mut bytes = BytesMut::new();
+            bytes.put_u8(b'$');
+            bytes.extend_from_slice(rdb_file.len().to_string().as_bytes());
+            bytes.extend_from_slice(b"\r\n");
+            bytes.extend_from_slice(&rdb_file);
+            write_stream.write(bytes).await
+        } else {
+            Err(anyhow::anyhow!(
+                "[redis - error] Redis must be running in primary mode to respond to 'PSYNC' command"
+            ))
+        }
+    }
+}
+
+impl RedisManager {
     fn setup_client_connection_handling(
         &mut self,
         mut server: RedisServer,
@@ -167,5 +241,166 @@ impl RedisManager {
                 Err(err) => return Err(err),
             }
         }
+    }
+}
+
+impl RedisManager {
+    async fn complete_handshake(
+        &mut self,
+        primary_address: impl ToSocketAddrs,
+        command_tx: mpsc::Sender<RedisCommandPacket>,
+    ) -> anyhow::Result<()> {
+        let primary_stream = TcpStream::connect(primary_address).await?;
+        let (read_stream, mut write_stream) = primary_stream.into_split();
+        let mut read_stream = RESPReader::new(read_stream);
+        self.send_ping(&mut read_stream, &mut write_stream).await?;
+        self.send_replconf_port(&mut read_stream, &mut write_stream)
+            .await?;
+        self.send_replconf_capa(&mut read_stream, &mut write_stream)
+            .await?;
+        self.send_psync(read_stream, write_stream, command_tx)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn send_ping(
+        &mut self,
+        read_stream: &mut RESPReader<OwnedReadHalf>,
+        write_stream: &mut OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        let ping = RESPValue::Array(vec![RESPValue::BulkString(Bytes::from_static(b"PING"))]);
+        let bytes = Bytes::from(ping);
+        write_stream.write_all(&bytes).await?;
+        match read_stream.read_value().await {
+            Ok(RESPValue::SimpleString(s)) if &*s == b"PONG" => Ok(()),
+            _ => Err(anyhow::anyhow!(
+                "[redis - error] expected simple-string encoded 'PONG' from primary"
+            )),
+        }
+    }
+
+    async fn send_replconf_port(
+        &mut self,
+        read_stream: &mut RESPReader<OwnedReadHalf>,
+        write_stream: &mut OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        let port = self.address.port();
+        let replconf_port = RESPValue::Array(vec![
+            RESPValue::BulkString(Bytes::from_static(b"replconf")),
+            RESPValue::BulkString(Bytes::from_static(b"listening-port")),
+            RESPValue::BulkString(Bytes::copy_from_slice(port.to_string().as_bytes())),
+        ]);
+
+        let bytes = Bytes::from(replconf_port);
+        write_stream.write_all(&bytes).await?;
+        match read_stream.read_value().await {
+            Ok(RESPValue::SimpleString(s)) if &*s == b"OK" => Ok(()),
+            _ => Err(anyhow::anyhow!(
+                "[redis - error] expected simple-string encoded 'OK' from primary"
+            )),
+        }
+    }
+
+    async fn send_replconf_capa(
+        &mut self,
+        read_stream: &mut RESPReader<OwnedReadHalf>,
+        write_stream: &mut OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        let replconf_capa = RESPValue::Array(vec![
+            RESPValue::BulkString(Bytes::from_static(b"replconf")),
+            RESPValue::BulkString(Bytes::from_static(b"capa")),
+            RESPValue::BulkString(Bytes::from_static(b"psync2")),
+        ]);
+
+        let bytes = Bytes::from(replconf_capa);
+        write_stream.write_all(&bytes).await?;
+        match read_stream.read_value().await {
+            Ok(RESPValue::SimpleString(s)) if &*s == b"OK" => Ok(()),
+            _ => Err(anyhow::anyhow!(
+                "[redis - error] expected simple-string encoded 'OK' from primary"
+            )),
+        }
+    }
+
+    async fn send_psync(
+        &mut self,
+        mut read_half: RESPReader<OwnedReadHalf>,
+        mut write_half: OwnedWriteHalf,
+        command_tx: mpsc::Sender<RedisCommandPacket>,
+    ) -> anyhow::Result<()> {
+        let psync = RESPValue::Array(vec![
+            RESPValue::BulkString(Bytes::from_static(b"psync")),
+            RESPValue::BulkString(Bytes::from_static(b"?")),
+            RESPValue::BulkString(Bytes::from_static(b"-1")),
+        ]);
+
+        let bytes = Bytes::from(psync);
+        write_half.write_all(&bytes).await?;
+        let response = read_half.read_value().await?;
+        let response = if let RESPValue::SimpleString(response) = response {
+            String::from_utf8(response.to_vec())?
+        } else {
+            return Err(anyhow::anyhow!(
+                "[redis - error] expected a simple-string encoded response from the primary"
+            ));
+        };
+
+        if let Some(primary_info) = response.strip_prefix("FULLRESYNC ") {
+            let mut primary_info = primary_info.split_ascii_whitespace();
+            let _replication_id = primary_info.next().unwrap();
+            let _replication_offset = primary_info.next().unwrap().parse::<usize>()?;
+            let _rdb_file = read_half.read_rdb_file().await?;
+            tokio::spawn(async move {
+                let (write_tx, mut write_rx) = mpsc::channel::<Bytes>(32);
+                let write_stream = RedisWriteStream::new(write_tx);
+                tokio::spawn(async move {
+                    while let Some(_) = write_rx.recv().await {
+                        // NOTE: replica should not respond to replicated commands sent by primary
+                    }
+                });
+
+                loop {
+                    let command = read_half
+                        .read_value()
+                        .await
+                        .and_then(|value| value.try_into())
+                        .context("[redis - error] unable to parse RESP value into command")?;
+
+                    let packet = RedisCommandPacket {
+                        command,
+                        write_stream: write_stream.clone(),
+                    };
+
+                    if read_half.is_closed() || command_tx.send(packet).await.is_err() {
+                        break;
+                    }
+                }
+
+                anyhow::Ok(())
+            });
+
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "[redis - error] expected 'FULLRESYNC' from primary but got '{response}'"
+            ))
+        }
+    }
+}
+
+impl RedisManager {
+    async fn try_replicate(&mut self, command: RedisStoreCommand) -> anyhow::Result<()> {
+        if command.is_write() {
+            if let RedisReplicationMode::Primary { replicas, .. } = &mut self.replication_mode {
+                let value: RESPValue = command.into();
+                let bytes: Bytes = value.into();
+                for replica in replicas {
+                    replica.write(bytes.clone()).await?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
