@@ -79,7 +79,7 @@ impl RedisManager {
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
             command,
-            mut write_stream,
+            write_stream,
         }) = command_rx.recv().await
         {
             match command {
@@ -116,7 +116,7 @@ impl RedisManager {
         Ok(())
     }
 
-    async fn ping(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+    async fn ping(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         let response = RESPValue::BulkString(Bytes::from_static(b"PONG"));
         write_stream.write(Bytes::from(response)).await
     }
@@ -124,7 +124,7 @@ impl RedisManager {
     async fn echo(
         &mut self,
         echo: Bytes,
-        mut write_stream: RedisWriteStream,
+        write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
         let response = RESPValue::BulkString(echo);
         write_stream.write(Bytes::from(response)).await
@@ -133,7 +133,7 @@ impl RedisManager {
     async fn info(
         &mut self,
         section: InfoSection,
-        mut write_stream: RedisWriteStream,
+        write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
         match section {
             InfoSection::Default | InfoSection::Replication => {
@@ -155,15 +155,15 @@ impl RedisManager {
         }
     }
 
-    async fn repl_conf_port(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+    async fn repl_conf_port(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         write_stream.write(Bytes::from_static(b"+OK\r\n")).await
     }
 
-    async fn repl_conf_capa(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+    async fn repl_conf_capa(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         write_stream.write(Bytes::from_static(b"+OK\r\n")).await
     }
 
-    async fn psync(&mut self, mut write_stream: RedisWriteStream) -> anyhow::Result<()> {
+    async fn psync(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         if let RedisReplicationMode::Primary {
             replication_id,
             replication_offset,
@@ -389,9 +389,9 @@ impl RedisManager {
 }
 
 impl RedisManager {
-    async fn try_replicate(&mut self, command: RedisStoreCommand) -> anyhow::Result<()> {
+    async fn try_replicate(&self, command: RedisStoreCommand) -> anyhow::Result<()> {
         if command.is_write() {
-            if let RedisReplicationMode::Primary { replicas, .. } = &mut self.replication_mode {
+            if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
                 let value: RESPValue = command.into();
                 let bytes: Bytes = value.into();
                 for replica in replicas {

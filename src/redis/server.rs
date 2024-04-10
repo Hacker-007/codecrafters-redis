@@ -36,7 +36,7 @@ impl RedisWriteStream {
 }
 
 impl RedisWriteStream {
-    pub async fn write(&mut self, bytes: impl Into<Bytes>) -> anyhow::Result<()> {
+    pub async fn write(&self, bytes: impl Into<Bytes>) -> anyhow::Result<()> {
         self.0.send(bytes.into()).await?;
         Ok(())
     }
