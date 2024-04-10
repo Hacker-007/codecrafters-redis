@@ -1,7 +1,4 @@
-use redis::{
-    manager::{RedisManager, RedisReplicationMode},
-    store::RedisStore,
-};
+use redis::{manager::RedisManager, replication::RedisReplicationMode, store::RedisStore};
 
 mod redis;
 

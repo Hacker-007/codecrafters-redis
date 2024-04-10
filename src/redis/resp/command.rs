@@ -1,40 +1,15 @@
 use bytes::Bytes;
 use std::time::{Duration, SystemTime};
 
+use crate::redis::replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection};
+
 use super::RESPValue;
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum InfoSection {
-    Replication,
-    Default,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ReplConfSection {
-    Port { listening_port: u16 },
-    Capa { capabilities: Vec<Bytes> },
-    GetAck,
-}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
     Echo {
         echo: Bytes,
-    },
-    Info {
-        section: InfoSection,
-    },
-    ReplConf {
-        section: ReplConfSection,
-    },
-    PSync {
-        replication_id: String,
-        replication_offset: i64,
-    },
-    Wait {
-        num_replicas: usize,
-        timeout: usize,
     },
 }
 
@@ -52,8 +27,9 @@ pub enum RedisStoreCommand {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisCommand {
-    Server(RedisServerCommand),
     Store(RedisStoreCommand),
+    Server(RedisServerCommand),
+    Replication(RedisReplicationCommand),
 }
 
 impl RedisStoreCommand {
@@ -65,8 +41,9 @@ impl RedisStoreCommand {
 impl From<&RedisCommand> for RESPValue {
     fn from(command: &RedisCommand) -> Self {
         match command {
-            RedisCommand::Server(command) => command.into(),
             RedisCommand::Store(command) => command.into(),
+            RedisCommand::Server(command) => command.into(),
+            RedisCommand::Replication(command) => command.into(),
         }
     }
 }
@@ -80,63 +57,6 @@ impl From<&RedisServerCommand> for RESPValue {
             RedisServerCommand::Echo { echo } => RESPValue::Array(vec![
                 RESPValue::BulkString(Bytes::from_static(b"ECHO")),
                 RESPValue::BulkString(echo.clone()),
-            ]),
-            RedisServerCommand::Info {
-                section: InfoSection::Default,
-            } => RESPValue::Array(vec![RESPValue::BulkString(Bytes::from_static(b"INFO"))]),
-            RedisServerCommand::Info {
-                section: InfoSection::Replication,
-            } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"INFO")),
-                RESPValue::BulkString(Bytes::from_static(b"replication")),
-            ]),
-            RedisServerCommand::ReplConf {
-                section: ReplConfSection::Port { listening_port },
-            } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
-                RESPValue::BulkString(Bytes::from_static(b"listening-port")),
-                RESPValue::BulkString(Bytes::copy_from_slice(
-                    listening_port.to_string().as_bytes(),
-                )),
-            ]),
-            RedisServerCommand::ReplConf {
-                section: ReplConfSection::Capa { capabilities },
-            } => {
-                let mut values = vec![
-                    RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
-                    RESPValue::BulkString(Bytes::from_static(b"capa")),
-                ];
-
-                for capability in capabilities {
-                    values.push(RESPValue::BulkString(capability.clone()));
-                }
-
-                RESPValue::Array(values)
-            }
-            RedisServerCommand::ReplConf {
-                section: ReplConfSection::GetAck,
-            } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
-                RESPValue::BulkString(Bytes::from_static(b"GETACK")),
-                RESPValue::BulkString(Bytes::from_static(b"*")),
-            ]),
-            RedisServerCommand::PSync {
-                replication_id,
-                replication_offset,
-            } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"PSYNC")),
-                RESPValue::BulkString(Bytes::copy_from_slice(replication_id.as_bytes())),
-                RESPValue::BulkString(Bytes::copy_from_slice(
-                    replication_offset.to_string().as_bytes(),
-                )),
-            ]),
-            RedisServerCommand::Wait {
-                num_replicas,
-                timeout,
-            } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"WAIT")),
-                RESPValue::BulkString(Bytes::copy_from_slice(num_replicas.to_string().as_bytes())),
-                RESPValue::BulkString(Bytes::copy_from_slice(timeout.to_string().as_bytes())),
             ]),
         }
     }
@@ -238,18 +158,6 @@ impl TryFrom<RESPValue> for RedisCommand {
         let mut parser = CommandParser::new(command_parts);
         let command_name = parser.parse_next().unwrap().to_ascii_lowercase();
         match &*command_name {
-            b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
-            b"echo" => parser
-                .expect_arg("echo", "echo")
-                .map(|echo| RedisCommand::Server(RedisServerCommand::Echo { echo })),
-            b"info" => Ok(RedisCommand::Server(RedisServerCommand::Info {
-                section: parser
-                    .attempt_flag(|byte| match byte {
-                        b"replication" => Some(InfoSection::Replication),
-                        _ => Some(InfoSection::Default),
-                    })
-                    .unwrap(),
-            })),
             b"get" => parser
                 .expect_arg("get", "key")
                 .map(|key| RedisCommand::Store(RedisStoreCommand::Get { key })),
@@ -269,6 +177,18 @@ impl TryFrom<RESPValue> for RedisCommand {
                     px,
                 }))
             }
+            b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
+            b"echo" => parser
+                .expect_arg("echo", "echo")
+                .map(|echo| RedisCommand::Server(RedisServerCommand::Echo { echo })),
+            b"info" => Ok(RedisCommand::Replication(RedisReplicationCommand::Info {
+                section: parser
+                    .attempt_flag(|byte| match byte {
+                        b"replication" => Some(InfoSection::Replication),
+                        _ => Some(InfoSection::Default),
+                    })
+                    .unwrap(),
+            })),
             b"replconf" => {
                 let section = match parser
                     .parse_next()
@@ -305,7 +225,7 @@ impl TryFrom<RESPValue> for RedisCommand {
                     }
                 };
 
-                Ok(RedisCommand::Server(RedisServerCommand::ReplConf {
+                Ok(RedisCommand::Replication(RedisReplicationCommand::ReplConf {
                     section,
                 }))
             }
@@ -314,7 +234,7 @@ impl TryFrom<RESPValue> for RedisCommand {
                 let replication_id = String::from_utf8(replication_id.to_vec())?;
                 let replication_offset = parser.expect_arg("psync", "replication_offset")?;
                 let replication_offset = std::str::from_utf8(&replication_offset)?.parse()?;
-                Ok(RedisCommand::Server(RedisServerCommand::PSync {
+                Ok(RedisCommand::Replication(RedisReplicationCommand::PSync {
                     replication_id,
                     replication_offset,
                 }))
@@ -324,7 +244,7 @@ impl TryFrom<RESPValue> for RedisCommand {
                 let num_replicas = std::str::from_utf8(&num_replicas)?.parse()?;
                 let timeout = parser.expect_arg("wait", "timeout")?;
                 let timeout = std::str::from_utf8(&timeout)?.parse()?;
-                Ok(RedisCommand::Server(RedisServerCommand::Wait {
+                Ok(RedisCommand::Replication(RedisReplicationCommand::Wait {
                     num_replicas,
                     timeout,
                 }))
