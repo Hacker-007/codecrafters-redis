@@ -1,10 +1,13 @@
 use bytes::{Bytes, BytesMut};
 
-use crate::redis::{resp::RESPValue, server::RedisWriteStream};
+use crate::redis::{
+    resp::RESPValue,
+    server::{ClientId, RedisWriteStream},
+};
 
 use super::{
     command::{InfoSection, RedisReplicationCommand, ReplConfSection},
-    RedisReplicationMode, RedisReplicator,
+    RedisReplicationMode, RedisReplicator, ReplicaInfo,
 };
 
 const EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
@@ -12,6 +15,7 @@ const EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e3
 impl RedisReplicator {
     pub async fn handle_command(
         &mut self,
+        id: ClientId,
         command: &RedisReplicationCommand,
         write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
@@ -23,13 +27,20 @@ impl RedisReplicator {
             RedisReplicationCommand::ReplConf {
                 section: ReplConfSection::Capa { .. },
             } => self.repl_conf_capa(write_stream).await?,
+            RedisReplicationCommand::PSync { .. } => {
+                self.psync(write_stream.clone()).await?;
+                self.add_replica(ReplicaInfo {
+                    id,
+                    write_stream,
+                    acked_bytes: 0,
+                });
+            }
             RedisReplicationCommand::ReplConf {
                 section: ReplConfSection::GetAck,
             } => self.getack(write_stream).await?,
-            RedisReplicationCommand::PSync { .. } => {
-                self.psync(write_stream.clone()).await?;
-                self.add_replica(write_stream);
-            }
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::Ack { processed_bytes },
+            } => self.ack(id, *processed_bytes).await?,
             RedisReplicationCommand::Wait {
                 num_replicas,
                 timeout,
@@ -118,6 +129,24 @@ impl RedisReplicator {
             write_stream.write(bytes).await
         } else {
             Err(anyhow::anyhow!("[redis - error] Redis must be running as a replica to respond to 'replconf getack' command"))
+        }
+    }
+
+    async fn ack(
+        &mut self,
+        id: ClientId,
+        processed_bytes: usize,
+    ) -> anyhow::Result<()> {
+        if let RedisReplicationMode::Primary { replicas, .. } = &mut self.replication_mode {
+            let replica_info = replicas.get_mut(&id).ok_or_else(|| {
+                anyhow::anyhow!("[redis - error] reference to replica with unknown client id")
+            })?;
+
+            replica_info.acked_bytes = processed_bytes;
+            eprintln!("{replicas:#?}");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("[redis - error] Redis must be running as a primary to handle 'replconf ack' response"))
         }
     }
 

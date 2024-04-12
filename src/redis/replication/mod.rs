@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::HashMap, fmt::Debug, net::SocketAddr};
 
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -6,18 +6,33 @@ use tokio::sync::mpsc;
 use super::{
     manager::RedisCommandPacket,
     resp::{command::RedisCommand, RESPValue},
-    server::RedisWriteStream,
+    server::{ClientId, RedisWriteStream},
 };
 
 pub mod command;
 pub mod handler;
 pub mod handshake;
 
+pub struct ReplicaInfo {
+    id: ClientId,
+    write_stream: RedisWriteStream,
+    acked_bytes: usize,
+}
+
+impl Debug for ReplicaInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplicaInfo")
+            .field("id", &self.id)
+            .field("acked_bytes", &self.acked_bytes)
+            .finish()
+    }
+}
+
 pub enum RedisReplicationMode {
     Primary {
         replication_id: String,
         replication_offset: u64,
-        replicas: Vec<RedisWriteStream>,
+        replicas: HashMap<ClientId, ReplicaInfo>,
     },
     Replica {
         primary_host: String,
@@ -62,8 +77,8 @@ impl RedisReplicator {
 
     pub async fn try_replicate(&self, bytes: Bytes) -> anyhow::Result<()> {
         if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
-            for replica in replicas {
-                replica.write(bytes.clone()).await?;
+            for (_, replica_info) in replicas {
+                replica_info.write_stream.write(bytes.clone()).await?;
             }
         }
 
@@ -81,9 +96,9 @@ impl RedisReplicator {
         }
     }
 
-    fn add_replica(&mut self, write_stream: RedisWriteStream) {
+    fn add_replica(&mut self, replica_info: ReplicaInfo) {
         if let RedisReplicationMode::Primary { replicas, .. } = &mut self.replication_mode {
-            replicas.push(write_stream)
+            replicas.insert(replica_info.id, replica_info);
         }
     }
 }

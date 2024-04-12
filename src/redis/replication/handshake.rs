@@ -12,7 +12,7 @@ use tokio::{
 use crate::redis::{
     manager::RedisCommandPacket,
     resp::{command::RedisCommand, resp_reader::RESPReader, RESPValue},
-    server::RedisWriteStream,
+    server::{ClientId, RedisWriteStream},
 };
 
 pub async fn complete_handshake(
@@ -132,7 +132,7 @@ async fn send_psync(
                     }
                 }
 
-                let packet = RedisCommandPacket::new(command, write_stream);
+                let packet = RedisCommandPacket::new(ClientId::primary(), command, write_stream);
                 if read_half.is_closed() || command_tx.send(packet).await.is_err() {
                     break;
                 }

@@ -13,6 +13,7 @@ pub enum ReplConfSection {
     Port { listening_port: u16 },
     Capa { capabilities: Vec<Bytes> },
     GetAck,
+    Ack { processed_bytes: usize }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -87,6 +88,13 @@ impl From<&RedisReplicationCommand> for RESPValue {
                 RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
                 RESPValue::BulkString(Bytes::from_static(b"GETACK")),
                 RESPValue::BulkString(Bytes::from_static(b"*")),
+            ]),
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::Ack { processed_bytes },
+            } => RESPValue::Array(vec![
+                RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
+                RESPValue::BulkString(Bytes::from_static(b"ACK")),
+                RESPValue::BulkString(Bytes::copy_from_slice(processed_bytes.to_string().as_bytes())),
             ]),
             RedisReplicationCommand::PSync {
                 replication_id,

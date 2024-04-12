@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{fmt::Display, net::SocketAddr, ops::AddAssign};
 
 use bytes::Bytes;
 use tokio::{
@@ -9,8 +9,30 @@ use tokio::{
 
 use super::resp::{command::RedisCommand, resp_reader::RESPReader};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClientId(usize);
+
+impl ClientId {
+    pub fn primary() -> Self {
+        Self(usize::MAX)
+    }
+}
+
+impl Display for ClientId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl AddAssign<usize> for ClientId {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 += rhs;
+    }
+}
+
 #[derive(Debug)]
 pub struct RedisServer {
+    id: ClientId,
     listener: TcpListener,
 }
 
@@ -34,7 +56,10 @@ pub struct RedisWriteStream {
 
 impl RedisWriteStream {
     pub fn new(tx: mpsc::Sender<Bytes>) -> Self {
-        Self { should_send: true, tx }
+        Self {
+            should_send: true,
+            tx,
+        }
     }
 }
 
@@ -52,15 +77,23 @@ impl RedisWriteStream {
     }
 }
 
+pub struct ClientConnectionInfo {
+    pub id: ClientId,
+    pub address: SocketAddr,
+}
+
 impl RedisServer {
     pub async fn start(addresses: impl ToSocketAddrs) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(addresses).await?;
-        Ok(Self { listener })
+        Ok(Self {
+            id: ClientId(0),
+            listener,
+        })
     }
 
     pub async fn accept(
         &mut self,
-    ) -> anyhow::Result<(RedisReadStream, RedisWriteStream, SocketAddr)> {
+    ) -> anyhow::Result<(RedisReadStream, RedisWriteStream, ClientConnectionInfo)> {
         let (stream, address) = self.listener.accept().await?;
         let (read_half, mut write_half) = stream.into_split();
         let mut read_half = RESPReader::new(read_half);
@@ -87,10 +120,12 @@ impl RedisServer {
             }
         });
 
+        let id = self.id;
+        self.id += 1;
         Ok((
             RedisReadStream(read_rx),
             RedisWriteStream::new(write_tx),
-            address,
+            ClientConnectionInfo { id, address },
         ))
     }
 }
