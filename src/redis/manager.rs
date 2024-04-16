@@ -114,7 +114,8 @@ impl RedisManager {
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
                     if let Err(err) =
-                        Self::process_stream(client_info.id, read_stream, write_stream, command_tx).await
+                        Self::process_stream(client_info.id, read_stream, write_stream, command_tx)
+                            .await
                     {
                         eprintln!("{err}");
                         eprintln!(

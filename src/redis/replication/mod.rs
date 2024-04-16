@@ -77,7 +77,7 @@ impl RedisReplicator {
 
     pub async fn try_replicate(&self, bytes: Bytes) -> anyhow::Result<()> {
         if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
-            for (_, replica_info) in replicas {
+            for replica_info in replicas.values() {
                 replica_info.write_stream.write(bytes.clone()).await?;
             }
         }

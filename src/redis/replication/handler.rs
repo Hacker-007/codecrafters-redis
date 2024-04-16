@@ -132,18 +132,13 @@ impl RedisReplicator {
         }
     }
 
-    async fn ack(
-        &mut self,
-        id: ClientId,
-        processed_bytes: usize,
-    ) -> anyhow::Result<()> {
+    async fn ack(&mut self, id: ClientId, processed_bytes: usize) -> anyhow::Result<()> {
         if let RedisReplicationMode::Primary { replicas, .. } = &mut self.replication_mode {
             let replica_info = replicas.get_mut(&id).ok_or_else(|| {
                 anyhow::anyhow!("[redis - error] reference to replica with unknown client id")
             })?;
 
             replica_info.acked_bytes = processed_bytes;
-            eprintln!("{replicas:#?}");
             Ok(())
         } else {
             Err(anyhow::anyhow!("[redis - error] Redis must be running as a primary to handle 'replconf ack' response"))

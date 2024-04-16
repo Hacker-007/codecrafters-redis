@@ -13,7 +13,7 @@ pub enum ReplConfSection {
     Port { listening_port: u16 },
     Capa { capabilities: Vec<Bytes> },
     GetAck,
-    Ack { processed_bytes: usize }
+    Ack { processed_bytes: usize },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -36,14 +36,12 @@ pub enum RedisReplicationCommand {
 
 impl RedisReplicationCommand {
     pub fn is_getack(&self) -> bool {
-        if let Self::ReplConf {
-            section: ReplConfSection::GetAck,
-        } = self
-        {
-            true
-        } else {
-            false
-        }
+        matches!(
+            self,
+            Self::ReplConf {
+                section: ReplConfSection::GetAck
+            }
+        )
     }
 }
 
@@ -94,7 +92,9 @@ impl From<&RedisReplicationCommand> for RESPValue {
             } => RESPValue::Array(vec![
                 RESPValue::BulkString(Bytes::from_static(b"REPLCONF")),
                 RESPValue::BulkString(Bytes::from_static(b"ACK")),
-                RESPValue::BulkString(Bytes::copy_from_slice(processed_bytes.to_string().as_bytes())),
+                RESPValue::BulkString(Bytes::copy_from_slice(
+                    processed_bytes.to_string().as_bytes(),
+                )),
             ]),
             RedisReplicationCommand::PSync {
                 replication_id,

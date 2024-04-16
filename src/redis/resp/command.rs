@@ -8,9 +8,7 @@ use super::RESPValue;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
-    Echo {
-        echo: Bytes,
-    },
+    Echo { echo: Bytes },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -225,9 +223,9 @@ impl TryFrom<RESPValue> for RedisCommand {
                     }
                 };
 
-                Ok(RedisCommand::Replication(RedisReplicationCommand::ReplConf {
-                    section,
-                }))
+                Ok(RedisCommand::Replication(
+                    RedisReplicationCommand::ReplConf { section },
+                ))
             }
             b"psync" => {
                 let replication_id = parser.expect_arg("psync", "replication_id")?;
