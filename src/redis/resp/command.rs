@@ -209,6 +209,14 @@ impl TryFrom<RESPValue> for RedisCommand {
 
                         ReplConfSection::Capa { capabilities }
                     }
+                    Some(b"ack") => {
+                        if let Some(processed_bytes) = parser.parse_next().as_deref() {
+                            let processed_bytes = std::str::from_utf8(processed_bytes)?.parse()?;
+                            ReplConfSection::Ack { processed_bytes }
+                        } else {
+                            return Err(anyhow::anyhow!("[redis - error] expected value for argument 'ack' for command 'replconf'"));
+                        }
+                    }
                     Some(b"getack") => {
                         if let Some(b"*") = parser.parse_next().as_deref() {
                             ReplConfSection::GetAck
