@@ -2,7 +2,10 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 
-use crate::redis::{replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection}, resp::command::{RedisCommand, RedisServerCommand, RedisStoreCommand}};
+use crate::redis::{
+    replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection},
+    resp::command::{RedisCommand, RedisServerCommand, RedisStoreCommand},
+};
 
 use super::{array, bulk_string};
 
@@ -130,12 +133,26 @@ impl From<&RedisReplicationCommand> for Bytes {
     fn from(command: &RedisReplicationCommand) -> Self {
         match command {
             RedisReplicationCommand::Info { section } => info(*section),
-            RedisReplicationCommand::ReplConf { section: ReplConfSection::Port { listening_port } } => replconf_port(*listening_port),
-            RedisReplicationCommand::ReplConf { section: ReplConfSection::Capa { capabilities } } => replconf_capa(capabilities),
-            RedisReplicationCommand::ReplConf { section: ReplConfSection::GetAck } => replconf_get_ack(),
-            RedisReplicationCommand::ReplConf { section: ReplConfSection::Ack { processed_bytes } } => replconf_ack(*processed_bytes),
-            RedisReplicationCommand::PSync { replication_id, replication_offset } => psync(replication_id, *replication_offset),
-            RedisReplicationCommand::Wait { num_replicas, timeout } => wait(*num_replicas, *timeout),
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::Port { listening_port },
+            } => replconf_port(*listening_port),
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::Capa { capabilities },
+            } => replconf_capa(capabilities),
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::GetAck,
+            } => replconf_get_ack(),
+            RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::Ack { processed_bytes },
+            } => replconf_ack(*processed_bytes),
+            RedisReplicationCommand::PSync {
+                replication_id,
+                replication_offset,
+            } => psync(replication_id, *replication_offset),
+            RedisReplicationCommand::Wait {
+                num_replicas,
+                timeout,
+            } => wait(*num_replicas, *timeout),
         }
     }
 }
