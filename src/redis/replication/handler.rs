@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use bytes::{Bytes, BytesMut};
+use tokio::task::JoinSet;
 
 use crate::redis::{
     resp::RESPValue,
@@ -6,6 +9,7 @@ use crate::redis::{
 };
 
 use super::{
+    acker::Acker,
     command::{InfoSection, RedisReplicationCommand, ReplConfSection},
     RedisReplicationMode, RedisReplicator, ReplicaInfo,
 };
@@ -32,7 +36,7 @@ impl RedisReplicator {
                 self.add_replica(ReplicaInfo {
                     id,
                     write_stream,
-                    acked_bytes: 0,
+                    acker: Acker::new(0),
                 });
             }
             RedisReplicationCommand::ReplConf {
@@ -138,7 +142,7 @@ impl RedisReplicator {
                 anyhow::anyhow!("[redis - error] reference to replica with unknown client id")
             })?;
 
-            replica_info.acked_bytes = processed_bytes;
+            replica_info.acker.ack(processed_bytes);
             Ok(())
         } else {
             Err(anyhow::anyhow!("[redis - error] Redis must be running as a primary to handle 'replconf ack' response"))
@@ -147,15 +151,78 @@ impl RedisReplicator {
 
     async fn wait(
         &mut self,
-        _num_replicas: usize,
-        _timeout: usize,
+        num_replicas: usize,
+        timeout: usize,
         write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
-        if let RedisReplicationMode::Primary { replicas, .. } = &self.replication_mode {
-            let replica_count = format!(":{}\r\n", replicas.len());
-            write_stream
-                .write(Bytes::copy_from_slice(replica_count.as_bytes()))
-                .await
+        if let RedisReplicationMode::Primary {
+            replicas,
+            replicated_bytes,
+            ..
+        } = &mut self.replication_mode
+        {
+            let get_ack_command = RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::GetAck,
+            };
+
+            let value = RESPValue::from(&get_ack_command);
+            let bytes = Bytes::from(value);
+            let mut join_set = JoinSet::new();
+            let mut acked_replicas = replicas
+                .values()
+                .filter(|replica_info| replica_info.acker.get_bytes() == *replicated_bytes)
+                .count();
+
+            let replica_count = replicas.len();
+            if acked_replicas >= std::cmp::min(num_replicas, replica_count) {
+                let replica_count = format!(":{}\r\n", acked_replicas);
+                write_stream
+                    .write(Bytes::copy_from_slice(replica_count.as_bytes()))
+                    .await?;
+                return Ok(());
+            }
+
+            
+            *replicated_bytes += bytes.len();
+            let expected_acked_bytes = *replicated_bytes - bytes.len();
+            for replica_info in replicas.values_mut() {
+                let mut rx = replica_info.acker.subscribe();
+                replica_info.write_stream.write(bytes.clone()).await?;
+                join_set.spawn(async move {
+                    rx.recv()
+                        .await
+                        .map(|acked_bytes| acked_bytes == expected_acked_bytes)
+                });
+            }
+
+            tokio::spawn(async move {
+                let timeout_millis = timeout.try_into()?;
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(timeout_millis)) => break,
+                        replica_ack_res = join_set.join_next() => {
+                            if let Some(replica_ack_res) = replica_ack_res {
+                                let is_up_to_date = replica_ack_res??;
+                                if is_up_to_date {
+                                    acked_replicas += 1;
+                                    if acked_replicas >= num_replicas || acked_replicas == replica_count {
+                                        break;
+                                    }
+                                }
+                            } else {
+                                break
+                            }
+                        }
+                    }
+                }
+
+                let replica_count = format!(":{}\r\n", acked_replicas);
+                write_stream
+                    .write(Bytes::copy_from_slice(replica_count.as_bytes()))
+                    .await
+            });
+
+            Ok(())
         } else {
             Err(anyhow::anyhow!("[redis - error] Redis must be running in primary mode to respond to 'WAIT' command"))
         }

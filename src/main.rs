@@ -42,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
             replication_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
             replication_offset: 0,
             replicas: HashMap::default(),
+            replicated_bytes: 0,
         }
     };
 
