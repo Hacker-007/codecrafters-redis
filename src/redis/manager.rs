@@ -3,13 +3,11 @@ use std::net::SocketAddr;
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::sync::mpsc;
 
-use crate::redis::resp::{
-    command::{RedisCommand, RedisServerCommand},
-    RESPValue,
-};
+use crate::redis::resp::command::{RedisCommand, RedisServerCommand};
 
 use super::{
     replication::{RedisReplicationMode, RedisReplicator},
+    resp::encoding,
     server::{ClientId, RedisReadStream, RedisServer, RedisWriteStream},
     store::RedisStore,
 };
@@ -68,14 +66,12 @@ impl RedisManager {
                     self.store.handle(command, &mut output)?;
                     write_stream.write(output.into_inner().freeze()).await?;
                     if command.is_write() {
-                        let value: RESPValue = command.into();
-                        let bytes: Bytes = value.into();
-                        self.replicator.try_replicate(bytes).await?;
+                        self.replicator.try_replicate(command.into()).await?;
                     }
                 }
                 RedisCommand::Server(RedisServerCommand::Ping) => self.ping(write_stream).await?,
-                RedisCommand::Server(RedisServerCommand::Echo { echo }) => {
-                    self.echo(echo.clone(), write_stream).await?
+                RedisCommand::Server(RedisServerCommand::Echo { message }) => {
+                    self.echo(message.clone(), write_stream).await?
                 }
                 RedisCommand::Replication(command) => {
                     self.replicator
@@ -91,13 +87,11 @@ impl RedisManager {
     }
 
     async fn ping(&mut self, write_stream: RedisWriteStream) -> anyhow::Result<()> {
-        let response = RESPValue::BulkString(Bytes::from_static(b"PONG"));
-        write_stream.write(Bytes::from(response)).await
+        write_stream.write(encoding::bulk_string("PONG")).await
     }
 
-    async fn echo(&mut self, echo: Bytes, write_stream: RedisWriteStream) -> anyhow::Result<()> {
-        let response = RESPValue::BulkString(echo);
-        write_stream.write(Bytes::from(response)).await
+    async fn echo(&mut self, message: Bytes, write_stream: RedisWriteStream) -> anyhow::Result<()> {
+        write_stream.write(encoding::bulk_string(message)).await
     }
 }
 

@@ -8,7 +8,7 @@ use super::RESPValue;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
-    Echo { echo: Bytes },
+    Echo { message: Bytes },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -33,62 +33,6 @@ pub enum RedisCommand {
 impl RedisStoreCommand {
     pub fn is_write(&self) -> bool {
         matches!(self, Self::Set { .. })
-    }
-}
-
-impl From<&RedisCommand> for RESPValue {
-    fn from(command: &RedisCommand) -> Self {
-        match command {
-            RedisCommand::Store(command) => command.into(),
-            RedisCommand::Server(command) => command.into(),
-            RedisCommand::Replication(command) => command.into(),
-        }
-    }
-}
-
-impl From<&RedisServerCommand> for RESPValue {
-    fn from(command: &RedisServerCommand) -> Self {
-        match command {
-            RedisServerCommand::Ping => {
-                RESPValue::Array(vec![RESPValue::BulkString(Bytes::from_static(b"PING"))])
-            }
-            RedisServerCommand::Echo { echo } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"ECHO")),
-                RESPValue::BulkString(echo.clone()),
-            ]),
-        }
-    }
-}
-
-impl From<&RedisStoreCommand> for RESPValue {
-    fn from(command: &RedisStoreCommand) -> Self {
-        match command {
-            RedisStoreCommand::Get { key } => RESPValue::Array(vec![
-                RESPValue::BulkString(Bytes::from_static(b"GET")),
-                RESPValue::BulkString(key.clone()),
-            ]),
-            RedisStoreCommand::Set { key, value, px } => {
-                let mut command = vec![
-                    RESPValue::BulkString(Bytes::from_static(b"SET")),
-                    RESPValue::BulkString(key.clone()),
-                    RESPValue::BulkString(value.clone()),
-                ];
-
-                if let Some(px) = px {
-                    let difference = match px.elapsed() {
-                        Ok(duration) => duration,
-                        Err(err) => err.duration(),
-                    };
-
-                    command.push(RESPValue::BulkString(Bytes::from_static(b"SET")));
-                    command.push(RESPValue::BulkString(Bytes::copy_from_slice(
-                        difference.as_millis().to_string().as_bytes(),
-                    )));
-                }
-
-                RESPValue::Array(command)
-            }
-        }
     }
 }
 
@@ -177,8 +121,8 @@ impl TryFrom<RESPValue> for RedisCommand {
             }
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser
-                .expect_arg("echo", "echo")
-                .map(|echo| RedisCommand::Server(RedisServerCommand::Echo { echo })),
+                .expect_arg("echo", "message")
+                .map(|message| RedisCommand::Server(RedisServerCommand::Echo { message })),
             b"info" => Ok(RedisCommand::Replication(RedisReplicationCommand::Info {
                 section: parser
                     .attempt_flag(|byte| match byte {

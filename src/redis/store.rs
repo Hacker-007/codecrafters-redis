@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::Write, time::SystemTime};
 
 use bytes::Bytes;
 
-use super::resp::{command::RedisStoreCommand, RESPValue};
+use super::resp::{command::RedisStoreCommand, encoding};
 
 type StoreKey = Bytes;
 
@@ -37,14 +37,13 @@ impl RedisStore {
                         ..
                     }) if *expiration <= SystemTime::now() => {
                         self.values.remove(key);
-                        RESPValue::NullBulkString
+                        encoding::null_bulk_string()
                     }
-                    Some(StoreValue { value, .. }) => RESPValue::BulkString(value.clone()),
-                    _ => RESPValue::NullBulkString,
+                    Some(StoreValue { value, .. }) => encoding::bulk_string(value),
+                    _ => encoding::null_bulk_string(),
                 };
 
-                let bytes = Bytes::from(value);
-                output_writer.write_all(&bytes)?;
+                output_writer.write_all(&Bytes::from(value))?;
                 Ok(())
             }
             RedisStoreCommand::Set { key, value, px } => {

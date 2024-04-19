@@ -7,14 +7,14 @@ use self::acker::Acker;
 
 use super::{
     manager::RedisCommandPacket,
-    resp::{command::RedisCommand, RESPValue},
+    resp::command::RedisCommand,
     server::{ClientId, RedisWriteStream},
 };
 
+mod acker;
 pub mod command;
 pub mod handler;
 pub mod handshake;
-mod acker;
 
 pub struct ReplicaInfo {
     id: ClientId,
@@ -80,7 +80,12 @@ impl RedisReplicator {
     }
 
     pub async fn try_replicate(&mut self, bytes: Bytes) -> anyhow::Result<()> {
-        if let RedisReplicationMode::Primary { ref replicas, ref mut replicated_bytes, .. } = &mut self.replication_mode {
+        if let RedisReplicationMode::Primary {
+            ref replicas,
+            ref mut replicated_bytes,
+            ..
+        } = &mut self.replication_mode
+        {
             *replicated_bytes += bytes.len();
             for replica_info in replicas.values() {
                 replica_info.write_stream.write(bytes.clone()).await?;
@@ -95,8 +100,7 @@ impl RedisReplicator {
             processed_bytes, ..
         } = &mut self.replication_mode
         {
-            let value = RESPValue::from(command);
-            let bytes = Bytes::from(value);
+            let bytes = Bytes::from(command);
             *processed_bytes += bytes.len();
         }
     }

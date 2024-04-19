@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::redis::{
     manager::RedisCommandPacket,
-    resp::{command::RedisCommand, resp_reader::RESPReader, RESPValue},
+    resp::{command::RedisCommand, encoding, resp_reader::RESPReader, RESPValue},
     server::{ClientId, RedisWriteStream},
 };
 
@@ -35,9 +35,7 @@ async fn send_ping(
     read_stream: &mut RESPReader<OwnedReadHalf>,
     write_stream: &mut OwnedWriteHalf,
 ) -> anyhow::Result<()> {
-    let ping = RESPValue::Array(vec![RESPValue::BulkString(Bytes::from_static(b"PING"))]);
-    let bytes = Bytes::from(ping);
-    write_stream.write_all(&bytes).await?;
+    write_stream.write_all(&encoding::ping()).await?;
     match read_stream.read_value().await {
         Ok(RESPValue::SimpleString(s)) if &*s == b"PONG" => Ok(()),
         _ => Err(anyhow::anyhow!(
@@ -51,14 +49,9 @@ async fn send_replconf_port(
     write_stream: &mut OwnedWriteHalf,
     port: u16,
 ) -> anyhow::Result<()> {
-    let replconf_port = RESPValue::Array(vec![
-        RESPValue::BulkString(Bytes::from_static(b"replconf")),
-        RESPValue::BulkString(Bytes::from_static(b"listening-port")),
-        RESPValue::BulkString(Bytes::copy_from_slice(port.to_string().as_bytes())),
-    ]);
-
-    let bytes = Bytes::from(replconf_port);
-    write_stream.write_all(&bytes).await?;
+    write_stream
+        .write_all(&encoding::replconf_port(port))
+        .await?;
     match read_stream.read_value().await {
         Ok(RESPValue::SimpleString(s)) if &*s == b"OK" => Ok(()),
         _ => Err(anyhow::anyhow!(
@@ -71,14 +64,9 @@ async fn send_replconf_capa(
     read_stream: &mut RESPReader<OwnedReadHalf>,
     write_stream: &mut OwnedWriteHalf,
 ) -> anyhow::Result<()> {
-    let replconf_capa = RESPValue::Array(vec![
-        RESPValue::BulkString(Bytes::from_static(b"replconf")),
-        RESPValue::BulkString(Bytes::from_static(b"capa")),
-        RESPValue::BulkString(Bytes::from_static(b"psync2")),
-    ]);
-
-    let bytes = Bytes::from(replconf_capa);
-    write_stream.write_all(&bytes).await?;
+    write_stream
+        .write_all(&encoding::replconf_capa(&[Bytes::from_static(b"psync2")]))
+        .await?;
     match read_stream.read_value().await {
         Ok(RESPValue::SimpleString(s)) if &*s == b"OK" => Ok(()),
         _ => Err(anyhow::anyhow!(
@@ -92,14 +80,7 @@ async fn send_psync(
     mut write_half: OwnedWriteHalf,
     command_tx: mpsc::Sender<RedisCommandPacket>,
 ) -> anyhow::Result<()> {
-    let psync = RESPValue::Array(vec![
-        RESPValue::BulkString(Bytes::from_static(b"psync")),
-        RESPValue::BulkString(Bytes::from_static(b"?")),
-        RESPValue::BulkString(Bytes::from_static(b"-1")),
-    ]);
-
-    let bytes = Bytes::from(psync);
-    write_half.write_all(&bytes).await?;
+    write_half.write_all(&encoding::psync("?", -1)).await?;
     let response = read_half.read_value().await?;
     let response = if let RESPValue::SimpleString(response) = response {
         String::from_utf8(response.to_vec())?
