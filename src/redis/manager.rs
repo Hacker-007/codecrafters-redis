@@ -64,7 +64,6 @@ impl RedisManager {
             write_stream,
         }) = command_rx.recv().await
         {
-            dbg!(&command);
             match &command {
                 RedisCommand::Store(command) => {
                     let mut output = BytesMut::with_capacity(2048).writer();
