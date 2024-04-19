@@ -8,7 +8,7 @@ use crate::redis::resp::command::{RedisCommand, RedisServerCommand};
 use super::{
     rdb::{RDBConfig, RDBPesistence},
     replication::{RedisReplication, RedisReplicationMode},
-    resp::encoding,
+    resp::{command::ConfigSection, encoding},
     server::{ClientConnectionInfo, RedisReadStream, RedisServer, RedisWriteStream},
     store::RedisStore,
 };
@@ -37,7 +37,7 @@ pub struct RedisManager {
     address: SocketAddr,
     store: RedisStore,
     replication: RedisReplication,
-    persistence: RDBPesistence,
+    rdb_persistence: RDBPesistence,
 }
 
 impl RedisManager {
@@ -51,7 +51,7 @@ impl RedisManager {
             address,
             store,
             replication: RedisReplication::new(address, replication_mode),
-            persistence: RDBPesistence::new(rdb_config),
+            rdb_persistence: RDBPesistence::new(rdb_config),
         }
     }
 
@@ -60,6 +60,7 @@ impl RedisManager {
         let server = RedisServer::start(self.address).await?;
         eprintln!("[redis] server started at {}", self.address);
 
+        self.rdb_persistence.setup().await?;
         self.replication.setup(command_tx.clone()).await?;
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
@@ -81,14 +82,12 @@ impl RedisManager {
                 RedisCommand::Server(RedisServerCommand::Echo { message }) => {
                     self.echo(message.clone(), write_stream).await?
                 }
+                RedisCommand::Server(RedisServerCommand::Config { section }) => {
+                    self.config(section, write_stream).await?
+                }
                 RedisCommand::Replication(command) => {
                     self.replication
                         .handle_command(client_info, command, write_stream)
-                        .await?
-                }
-                RedisCommand::Persistence(command) => {
-                    self.persistence
-                        .handle_command(command, write_stream)
                         .await?
                 }
             }
@@ -105,6 +104,32 @@ impl RedisManager {
 
     async fn echo(&mut self, message: Bytes, write_stream: RedisWriteStream) -> anyhow::Result<()> {
         write_stream.write(encoding::bulk_string(message)).await
+    }
+
+    async fn config(
+        &mut self,
+        section: &ConfigSection,
+        write_stream: RedisWriteStream,
+    ) -> anyhow::Result<()> {
+        match section {
+            ConfigSection::Get { keys } => {
+                let mut values = vec![];
+                for key in keys {
+                    values.push(encoding::bulk_string(key));
+                    if &**key == b"dir" {
+                        values.push(encoding::bulk_string(&self.rdb_persistence.config.dir));
+                    } else if &**key == b"dbfilename" {
+                        values.push(encoding::bulk_string(&self.rdb_persistence.config.file_name));
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "[redis - error] unexpected configuration key found"
+                        ));
+                    }
+                }
+
+                write_stream.write(encoding::array(values)).await
+            }
+        }
     }
 }
 

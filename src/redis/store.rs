@@ -14,13 +14,13 @@ pub struct StoreValue {
 
 #[derive(Debug)]
 pub struct RedisStore {
-    values: HashMap<StoreKey, StoreValue>,
+    items: HashMap<StoreKey, StoreValue>,
 }
 
 impl RedisStore {
     pub fn new() -> Self {
         Self {
-            values: HashMap::default(),
+            items: HashMap::default(),
         }
     }
 
@@ -31,12 +31,12 @@ impl RedisStore {
     ) -> anyhow::Result<()> {
         match command {
             RedisStoreCommand::Get { key } => {
-                let value = match self.values.get(key) {
+                let value = match self.items.get(key) {
                     Some(StoreValue {
                         expiration: Some(expiration),
                         ..
                     }) if *expiration <= SystemTime::now() => {
-                        self.values.remove(key);
+                        self.items.remove(key);
                         encoding::null_bulk_string()
                     }
                     Some(StoreValue { value, .. }) => encoding::bulk_string(value),
@@ -47,7 +47,7 @@ impl RedisStore {
                 Ok(())
             }
             RedisStoreCommand::Set { key, value, px } => {
-                self.values.insert(
+                self.items.insert(
                     key.clone(),
                     StoreValue {
                         value: value.clone(),
@@ -57,6 +57,20 @@ impl RedisStore {
 
                 output_writer.write_all(b"+OK\r\n")?;
                 Ok(())
+            }
+            RedisStoreCommand::Keys { key } => {
+                if &**key == b"*" {
+                    let keys = self.items.keys()
+                        .map(encoding::bulk_string)
+                        .collect();
+
+                    let bytes: Bytes = Bytes::from(encoding::array(keys));
+                    output_writer.write_all(&bytes)?;
+                    Ok(())
+                } else {
+                    Err(anyhow::anyhow!("[redis - error] unknown key pattern found for command 'KEYS'"))
+                }
+
             }
         }
     }

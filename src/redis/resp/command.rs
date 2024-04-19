@@ -1,14 +1,20 @@
 use bytes::Bytes;
 use std::time::{Duration, SystemTime};
 
-use crate::redis::{rdb::command::{ConfigSection, RedisPersistenceCommand}, replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection}};
+use crate::redis::replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection};
 
 use super::RESPValue;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ConfigSection {
+    Get { keys: Vec<Bytes> },
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisServerCommand {
     Ping,
     Echo { message: Bytes },
+    Config { section: ConfigSection },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,6 +26,9 @@ pub enum RedisStoreCommand {
         key: Bytes,
         value: Bytes,
         px: Option<SystemTime>,
+    },
+    Keys {
+        key: Bytes,
     },
 }
 
@@ -34,7 +43,6 @@ pub enum RedisCommand {
     Store(RedisStoreCommand),
     Server(RedisServerCommand),
     Replication(RedisReplicationCommand),
-    Persistence(RedisPersistenceCommand),
 }
 
 impl RedisCommand {
@@ -131,10 +139,37 @@ impl TryFrom<RESPValue> for RedisCommand {
                     px,
                 }))
             }
+            b"keys" => {
+                let key = parser.expect_arg("keys", "key")?;
+                Ok(RedisCommand::Store(RedisStoreCommand::Keys { key }))
+            }
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser
                 .expect_arg("echo", "message")
                 .map(|message| RedisCommand::Server(RedisServerCommand::Echo { message })),
+            b"config" => {
+                let section = match parser
+                    .parse_next()
+                    .map(|section| section.to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some(b"get") => {
+                        let mut keys = vec![];
+                        while let Some(key) = parser.parse_next() {
+                            keys.push(key);
+                        }
+
+                        ConfigSection::Get { keys }
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "[redis - error] unknown argument found for command 'config'"
+                        ))
+                    }
+                };
+
+                Ok(RedisCommand::Server(RedisServerCommand::Config { section }))
+            }
             b"info" => Ok(RedisCommand::Replication(RedisReplicationCommand::Info {
                 section: parser
                     .attempt_flag(|byte| match byte {
@@ -210,31 +245,6 @@ impl TryFrom<RESPValue> for RedisCommand {
                     num_replicas,
                     timeout,
                 }))
-            }
-            b"config" => {
-                let section = match parser
-                    .parse_next()
-                    .map(|section| section.to_ascii_lowercase())
-                    .as_deref()
-                {
-                    Some(b"get") => {
-                        let mut keys = vec![];
-                        while let Some(key) = parser.parse_next() {
-                            keys.push(key);
-                        }
-
-                        ConfigSection::Get { keys }
-                    }
-                    _ => {
-                        return Err(anyhow::anyhow!(
-                            "[redis - error] unknown argument found for command 'config'"
-                        ))
-                    }
-                };
-
-                Ok(RedisCommand::Persistence(
-                    RedisPersistenceCommand::Config { section }
-                ))
             }
             bytes => Err(anyhow::anyhow!(
                 "[redis - error] received an unprocessable command '{}'",

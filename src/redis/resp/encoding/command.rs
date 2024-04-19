@@ -3,7 +3,8 @@ use std::time::SystemTime;
 use bytes::Bytes;
 
 use crate::redis::{
-    rdb::command::{ConfigSection, RedisPersistenceCommand}, replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection}, resp::command::{RedisCommand, RedisServerCommand, RedisStoreCommand}
+    replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection},
+    resp::command::{ConfigSection, RedisCommand, RedisServerCommand, RedisStoreCommand},
 };
 
 use super::{array, bulk_string};
@@ -27,12 +28,30 @@ pub fn set(key: impl AsRef<[u8]>, value: impl AsRef<[u8]>, px: Option<&SystemTim
     array(values).into()
 }
 
+pub fn keys(key: &Bytes) -> Bytes {
+    array(vec![bulk_string("KEYS"), bulk_string(key)]).into()
+}
+
 pub fn ping() -> Bytes {
     array(vec![bulk_string("PING")]).into()
 }
 
 pub fn echo(message: impl AsRef<[u8]>) -> Bytes {
     array(vec![bulk_string("ECHO"), bulk_string(message)]).into()
+}
+
+pub fn config(section: &ConfigSection) -> Bytes {
+    let mut values = vec![bulk_string("CONFIG")];
+    match section {
+        ConfigSection::Get { keys } => {
+            values.push(bulk_string("GET"));
+            for key in keys {
+                values.push(bulk_string(key));
+            }
+        }
+    }
+
+    array(values).into()
 }
 
 pub fn info(section: InfoSection) -> Bytes {
@@ -100,27 +119,12 @@ pub fn wait(num_replicas: usize, timeout: usize) -> Bytes {
     .into()
 }
 
-pub fn config(section: &ConfigSection) -> Bytes {
-    let mut values = vec![bulk_string("CONFIG")];
-    match section {
-        ConfigSection::Get { keys } => {
-            values.push(bulk_string("GET"));
-            for key in keys {
-                values.push(bulk_string(key));
-            }
-        }
-    }
-
-    array(values).into()
-}
-
 impl From<&RedisCommand> for Bytes {
     fn from(command: &RedisCommand) -> Self {
         match command {
             RedisCommand::Store(command) => command.into(),
             RedisCommand::Server(command) => command.into(),
             RedisCommand::Replication(command) => command.into(),
-            RedisCommand::Persistence(command) => command.into(),
         }
     }
 }
@@ -130,6 +134,7 @@ impl From<&RedisStoreCommand> for Bytes {
         match command {
             RedisStoreCommand::Get { key } => get(key),
             RedisStoreCommand::Set { key, value, px } => set(key, value, px.as_ref()),
+            RedisStoreCommand::Keys { key } => keys(key),
         }
     }
 }
@@ -139,6 +144,7 @@ impl From<&RedisServerCommand> for Bytes {
         match command {
             RedisServerCommand::Ping => ping(),
             RedisServerCommand::Echo { message } => echo(message),
+            RedisServerCommand::Config { section } => config(section),
         }
     }
 }
@@ -167,14 +173,6 @@ impl From<&RedisReplicationCommand> for Bytes {
                 num_replicas,
                 timeout,
             } => wait(*num_replicas, *timeout),
-        }
-    }
-}
-
-impl From<&RedisPersistenceCommand> for Bytes {
-    fn from(command: &RedisPersistenceCommand) -> Self {
-        match command {
-            RedisPersistenceCommand::Config { section } => config(section),
         }
     }
 }

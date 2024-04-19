@@ -1,9 +1,6 @@
-pub mod handler;
-pub mod command;
-
 pub struct RDBConfig {
-    dir: String,
-    file_name: String,
+    pub dir: String,
+    pub file_name: String,
 }
 
 impl RDBConfig {
@@ -13,13 +10,15 @@ impl RDBConfig {
 }
 
 pub struct RDBPesistence {
-    config: RDBConfig,
+    pub config: RDBConfig,
 }
 
 impl RDBPesistence {
     pub fn new(config: RDBConfig) -> Self {
-        Self {
-            config,
-        }
+        Self { config }
+    }
+
+    pub async fn setup(&mut self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
