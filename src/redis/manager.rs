@@ -8,20 +8,24 @@ use crate::redis::resp::command::{RedisCommand, RedisServerCommand};
 use super::{
     replication::{RedisReplicationMode, RedisReplicator},
     resp::encoding,
-    server::{ClientId, RedisReadStream, RedisServer, RedisWriteStream},
+    server::{ClientConnectionInfo, RedisReadStream, RedisServer, RedisWriteStream},
     store::RedisStore,
 };
 
 pub struct RedisCommandPacket {
-    id: ClientId,
+    client_info: ClientConnectionInfo,
     command: RedisCommand,
     write_stream: RedisWriteStream,
 }
 
 impl RedisCommandPacket {
-    pub fn new(id: ClientId, command: RedisCommand, write_stream: RedisWriteStream) -> Self {
+    pub fn new(
+        client_info: ClientConnectionInfo,
+        command: RedisCommand,
+        write_stream: RedisWriteStream,
+    ) -> Self {
         Self {
-            id,
+            client_info,
             command,
             write_stream,
         }
@@ -55,11 +59,12 @@ impl RedisManager {
         self.replicator.setup(command_tx.clone()).await?;
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
-            id,
+            client_info,
             command,
             write_stream,
         }) = command_rx.recv().await
         {
+            dbg!(&command);
             match &command {
                 RedisCommand::Store(command) => {
                     let mut output = BytesMut::with_capacity(2048).writer();
@@ -75,7 +80,7 @@ impl RedisManager {
                 }
                 RedisCommand::Replication(command) => {
                     self.replicator
-                        .handle_command(id, command, write_stream)
+                        .handle_command(client_info, command, write_stream)
                         .await?
                 }
             }
@@ -104,11 +109,12 @@ impl RedisManager {
         tokio::spawn(async move {
             loop {
                 let (read_stream, write_stream, client_info) = server.accept().await?;
-                eprintln!("[redis] client at {} connected", client_info.address);
+                let address = client_info.address;
+                eprintln!("[redis] client at {} connected", address);
                 let command_tx = command_tx.clone();
                 tokio::spawn(async move {
                     if let Err(err) =
-                        Self::process_stream(client_info.id, read_stream, write_stream, command_tx)
+                        Self::process_stream(client_info, read_stream, write_stream, command_tx)
                             .await
                     {
                         eprintln!("{err}");
@@ -117,7 +123,7 @@ impl RedisManager {
                         )
                     }
 
-                    eprintln!("[redis] client at {} disconnected", client_info.address);
+                    eprintln!("[redis] client at {} disconnected", address);
                 });
             }
 
@@ -127,7 +133,7 @@ impl RedisManager {
     }
 
     async fn process_stream(
-        id: ClientId,
+        client_info: ClientConnectionInfo,
         mut read_stream: RedisReadStream,
         write_stream: RedisWriteStream,
         command_tx: mpsc::Sender<RedisCommandPacket>,
@@ -137,7 +143,7 @@ impl RedisManager {
                 Ok(Some(command)) => {
                     command_tx
                         .send(RedisCommandPacket {
-                            id,
+                            client_info: client_info.clone(),
                             command,
                             write_stream: write_stream.clone(),
                         })

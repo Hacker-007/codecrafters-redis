@@ -1,4 +1,12 @@
-use std::{fmt::Display, net::SocketAddr, ops::AddAssign};
+use std::{
+    fmt::Display,
+    net::SocketAddr,
+    ops::AddAssign,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use bytes::Bytes;
 use tokio::{
@@ -77,9 +85,11 @@ impl RedisWriteStream {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ClientConnectionInfo {
     pub id: ClientId,
     pub address: SocketAddr,
+    pub is_read_blocked: Arc<AtomicBool>,
 }
 
 impl RedisServer {
@@ -99,8 +109,11 @@ impl RedisServer {
         let mut read_half = RESPReader::new(read_half);
         let (read_tx, read_rx) = mpsc::channel(32);
         let (write_tx, mut write_rx) = mpsc::channel::<Bytes>(32);
+        let is_read_blocked = Arc::new(AtomicBool::new(false));
+        let read_block_signal = is_read_blocked.clone();
         tokio::spawn(async move {
             loop {
+                while read_block_signal.load(Ordering::Relaxed) {}
                 let command = read_half
                     .read_value()
                     .await
@@ -125,7 +138,11 @@ impl RedisServer {
         Ok((
             RedisReadStream(read_rx),
             RedisWriteStream::new(write_tx),
-            ClientConnectionInfo { id, address },
+            ClientConnectionInfo {
+                id,
+                address,
+                is_read_blocked,
+            },
         ))
     }
 }

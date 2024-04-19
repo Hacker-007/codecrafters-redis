@@ -1,11 +1,11 @@
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use bytes::Bytes;
 use tokio::task::JoinSet;
 
 use crate::redis::{
     resp::encoding,
-    server::{ClientId, RedisWriteStream},
+    server::{ClientConnectionInfo, ClientId, RedisWriteStream},
 };
 
 use super::{
@@ -19,7 +19,7 @@ const EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e3
 impl RedisReplicator {
     pub async fn handle_command(
         &mut self,
-        id: ClientId,
+        client_info: ClientConnectionInfo,
         command: &RedisReplicationCommand,
         write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
@@ -34,7 +34,7 @@ impl RedisReplicator {
             RedisReplicationCommand::PSync { .. } => {
                 self.psync(write_stream.clone()).await?;
                 self.add_replica(ReplicaInfo {
-                    id,
+                    id: client_info.id,
                     write_stream,
                     acker: Acker::new(0),
                 });
@@ -44,12 +44,12 @@ impl RedisReplicator {
             } => self.getack(write_stream).await?,
             RedisReplicationCommand::ReplConf {
                 section: ReplConfSection::Ack { processed_bytes },
-            } => self.ack(id, *processed_bytes).await?,
+            } => self.ack(client_info.id, *processed_bytes).await?,
             RedisReplicationCommand::Wait {
                 num_replicas,
                 timeout,
             } => {
-                self.wait(*num_replicas, *timeout, write_stream).await?;
+                self.wait(client_info, *num_replicas, *timeout, write_stream).await?;
             }
         }
 
@@ -144,6 +144,7 @@ impl RedisReplicator {
 
     async fn wait(
         &mut self,
+        client_info: ClientConnectionInfo,
         num_replicas: usize,
         timeout: usize,
         write_stream: RedisWriteStream,
@@ -166,6 +167,7 @@ impl RedisReplicator {
                 return write_stream.write(encoding::integer(replica_count)).await;
             }
 
+            client_info.is_read_blocked.store(true, Ordering::SeqCst);
             let bytes = encoding::replconf_get_ack();
             *replicated_bytes += bytes.len();
             let expected_acked_bytes = *replicated_bytes - bytes.len();
@@ -193,6 +195,8 @@ impl RedisReplicator {
                 })
                 .await;
 
+                
+                client_info.is_read_blocked.store(false, Ordering::SeqCst);
                 let replica_count: i64 = acked_replicas.try_into()?;
                 write_stream.write(encoding::integer(replica_count)).await
             });

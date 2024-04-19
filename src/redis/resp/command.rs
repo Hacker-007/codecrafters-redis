@@ -23,6 +23,12 @@ pub enum RedisStoreCommand {
     },
 }
 
+impl RedisStoreCommand {
+    pub fn is_write(&self) -> bool {
+        matches!(self, Self::Set { .. })
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisCommand {
     Store(RedisStoreCommand),
@@ -30,9 +36,14 @@ pub enum RedisCommand {
     Replication(RedisReplicationCommand),
 }
 
-impl RedisStoreCommand {
-    pub fn is_write(&self) -> bool {
-        matches!(self, Self::Set { .. })
+impl RedisCommand {
+    pub fn is_getack(&self) -> bool {
+        matches!(
+            self,
+            Self::Replication(RedisReplicationCommand::ReplConf {
+                section: ReplConfSection::GetAck
+            })
+        )
     }
 }
 

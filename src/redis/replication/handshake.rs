@@ -1,10 +1,15 @@
+use std::{
+    net::ToSocketAddrs,
+    sync::{atomic::AtomicBool, Arc},
+};
+
 use anyhow::Context;
 use bytes::Bytes;
 use tokio::{
     io::AsyncWriteExt,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream, ToSocketAddrs,
+        TcpStream,
     },
     sync::mpsc,
 };
@@ -12,12 +17,12 @@ use tokio::{
 use crate::redis::{
     manager::RedisCommandPacket,
     resp::{command::RedisCommand, encoding, resp_reader::RESPReader, RESPValue},
-    server::{ClientId, RedisWriteStream},
+    server::{ClientConnectionInfo, ClientId, RedisWriteStream},
 };
 
 pub async fn complete_handshake(
     replica_port: u16,
-    primary_address: impl ToSocketAddrs,
+    primary_address: (&str, u16),
     command_tx: mpsc::Sender<RedisCommandPacket>,
 ) -> anyhow::Result<()> {
     let primary_stream = TcpStream::connect(primary_address).await?;
@@ -26,7 +31,7 @@ pub async fn complete_handshake(
     send_ping(&mut read_stream, &mut write_stream).await?;
     send_replconf_port(&mut read_stream, &mut write_stream, replica_port).await?;
     send_replconf_capa(&mut read_stream, &mut write_stream).await?;
-    send_psync(read_stream, write_stream, command_tx).await?;
+    send_psync(primary_address, read_stream, write_stream, command_tx).await?;
 
     Ok(())
 }
@@ -76,6 +81,7 @@ async fn send_replconf_capa(
 }
 
 async fn send_psync(
+    (host, port): (&str, u16),
     mut read_half: RESPReader<OwnedReadHalf>,
     mut write_half: OwnedWriteHalf,
     command_tx: mpsc::Sender<RedisCommandPacket>,
@@ -97,23 +103,30 @@ async fn send_psync(
         let _rdb_file = read_half.read_rdb_file().await?;
 
         let write_stream = setup_replica_write_stream(write_half);
+        let primary_info = ClientConnectionInfo {
+            id: ClientId::primary(),
+            address: (host, port).to_socket_addrs()?.next().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "[redis - error] expected valid host and port to connect to primary"
+                )
+            })?,
+            is_read_blocked: Arc::new(AtomicBool::new(false)),
+        };
+
         tokio::spawn(async move {
             loop {
-                let command = read_half
+                let command: RedisCommand = read_half
                     .read_value()
                     .await
                     .and_then(|value| value.try_into())
                     .context("[redis - error] unable to parse RESP value into command")?;
 
                 let mut write_stream = write_stream.clone();
-                match command {
-                    RedisCommand::Replication(ref command) if command.is_getack() => {}
-                    _ => {
-                        write_stream.close();
-                    }
+                if !command.is_getack() {
+                    write_stream.close();
                 }
 
-                let packet = RedisCommandPacket::new(ClientId::primary(), command, write_stream);
+                let packet = RedisCommandPacket::new(primary_info.clone(), command, write_stream);
                 if read_half.is_closed() || command_tx.send(packet).await.is_err() {
                     break;
                 }

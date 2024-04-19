@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, net::SocketAddr};
+use std::{collections::HashMap, fmt::Debug, net::SocketAddr, ops::Deref};
 
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -70,7 +70,7 @@ impl RedisReplicator {
         {
             handshake::complete_handshake(
                 self.address.port(),
-                (primary_host.to_string(), *primary_port),
+                (primary_host.deref(), *primary_port),
                 command_tx.clone(),
             )
             .await?;
