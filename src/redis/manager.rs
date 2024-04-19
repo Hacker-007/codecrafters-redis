@@ -39,7 +39,7 @@ pub struct RedisManager {
 }
 
 impl RedisManager {
-    pub fn manage(
+    pub fn new(
         store: RedisStore,
         replication_mode: RedisReplicationMode,
         address: SocketAddr,

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use redis::{manager::RedisManager, replication::RedisReplicationMode, store::RedisStore};
 
 mod redis;
@@ -32,22 +30,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mode = if let Some((primary_host, primary_port)) = redis_mode {
         let primary_port = primary_port.parse()?;
-        RedisReplicationMode::Replica {
-            primary_host,
-            primary_port,
-            processed_bytes: 0,
-        }
+        RedisReplicationMode::replica(primary_host, primary_port)
     } else {
-        RedisReplicationMode::Primary {
-            replication_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
-            replication_offset: 0,
-            replicas: HashMap::default(),
-            replicated_bytes: 0,
-        }
+        RedisReplicationMode::primary("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string())
     };
 
     let store = RedisStore::new();
-    RedisManager::manage(store, mode, (host, port).into())
+    RedisManager::new(store, mode, (host, port).into())
         .start()
         .await
 }

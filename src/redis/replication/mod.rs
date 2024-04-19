@@ -45,6 +45,25 @@ pub enum RedisReplicationMode {
     },
 }
 
+impl RedisReplicationMode {
+    pub fn primary(replication_id: String) -> Self {
+        Self::Primary {
+            replication_id,
+            replication_offset: 0,
+            replicas: HashMap::default(),
+            replicated_bytes: 0,
+        }
+    }
+    
+    pub fn replica(primary_host: String, primary_port: u16) -> Self {
+        Self::Replica {
+            primary_host,
+            primary_port,
+            processed_bytes: 0,
+        }
+    }
+}
+
 pub struct RedisReplicator {
     address: SocketAddr,
     replication_mode: RedisReplicationMode,
