@@ -54,7 +54,7 @@ impl RedisReplicationMode {
             replicated_bytes: 0,
         }
     }
-    
+
     pub fn replica(primary_host: String, primary_port: u16) -> Self {
         Self::Replica {
             primary_host,
@@ -64,12 +64,12 @@ impl RedisReplicationMode {
     }
 }
 
-pub struct RedisReplicator {
+pub struct RedisReplication {
     address: SocketAddr,
     replication_mode: RedisReplicationMode,
 }
 
-impl RedisReplicator {
+impl RedisReplication {
     pub fn new(address: SocketAddr, replication_mode: RedisReplicationMode) -> Self {
         Self {
             address,

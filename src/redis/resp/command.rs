@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use std::time::{Duration, SystemTime};
 
-use crate::redis::replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection};
+use crate::redis::{rdb::command::{ConfigSection, RedisPersistenceCommand}, replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection}};
 
 use super::RESPValue;
 
@@ -34,6 +34,7 @@ pub enum RedisCommand {
     Store(RedisStoreCommand),
     Server(RedisServerCommand),
     Replication(RedisReplicationCommand),
+    Persistence(RedisPersistenceCommand),
 }
 
 impl RedisCommand {
@@ -209,6 +210,31 @@ impl TryFrom<RESPValue> for RedisCommand {
                     num_replicas,
                     timeout,
                 }))
+            }
+            b"config" => {
+                let section = match parser
+                    .parse_next()
+                    .map(|section| section.to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some(b"get") => {
+                        let mut keys = vec![];
+                        while let Some(key) = parser.parse_next() {
+                            keys.push(key);
+                        }
+
+                        ConfigSection::Get { keys }
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "[redis - error] unknown argument found for command 'config'"
+                        ))
+                    }
+                };
+
+                Ok(RedisCommand::Persistence(
+                    RedisPersistenceCommand::Config { section }
+                ))
             }
             bytes => Err(anyhow::anyhow!(
                 "[redis - error] received an unprocessable command '{}'",

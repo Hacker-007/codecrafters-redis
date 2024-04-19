@@ -1,4 +1,6 @@
-use redis::{manager::RedisManager, replication::RedisReplicationMode, store::RedisStore};
+use redis::{
+    manager::RedisManager, rdb::RDBConfig, replication::RedisReplicationMode, store::RedisStore,
+};
 
 mod redis;
 
@@ -19,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     })
     .unwrap_or(6379);
 
-    let redis_mode = parse_option("--replicaof", |mut args| {
+    let replication_mode = parse_option("--replicaof", |mut args| {
         (
             args.next()
                 .expect("[redis - error] expected host of primary for replica to connect to"),
@@ -28,7 +30,19 @@ async fn main() -> anyhow::Result<()> {
         )
     });
 
-    let mode = if let Some((primary_host, primary_port)) = redis_mode {
+    let rdb_dir = parse_option("--dir", |mut args| {
+        args.next()
+            .expect("[redis - error] value expected for RDB directory")
+    })
+    .unwrap_or("./".to_string());
+
+    let rdb_file_name = parse_option("--dbfilename", |mut args| {
+        args.next()
+            .expect("[redis - error] value expected for RDB file name")
+    })
+    .unwrap_or("dump.rdb".to_string());
+
+    let mode = if let Some((primary_host, primary_port)) = replication_mode {
         let primary_port = primary_port.parse()?;
         RedisReplicationMode::replica(primary_host, primary_port)
     } else {
@@ -36,7 +50,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let store = RedisStore::new();
-    RedisManager::new(store, mode, (host, port).into())
-        .start()
-        .await
+    RedisManager::new(
+        (host, port).into(),
+        store,
+        mode,
+        RDBConfig::new(rdb_dir, rdb_file_name),
+    )
+    .start()
+    .await
 }

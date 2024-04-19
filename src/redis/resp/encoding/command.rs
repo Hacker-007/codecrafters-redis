@@ -3,8 +3,7 @@ use std::time::SystemTime;
 use bytes::Bytes;
 
 use crate::redis::{
-    replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection},
-    resp::command::{RedisCommand, RedisServerCommand, RedisStoreCommand},
+    rdb::command::{ConfigSection, RedisPersistenceCommand}, replication::command::{InfoSection, RedisReplicationCommand, ReplConfSection}, resp::command::{RedisCommand, RedisServerCommand, RedisStoreCommand}
 };
 
 use super::{array, bulk_string};
@@ -37,7 +36,7 @@ pub fn echo(message: impl AsRef<[u8]>) -> Bytes {
 }
 
 pub fn info(section: InfoSection) -> Bytes {
-    let mut values = vec![bulk_string("ECHO")];
+    let mut values = vec![bulk_string("INFO")];
     match section {
         InfoSection::Default => {}
         InfoSection::Replication => values.push(bulk_string("replication")),
@@ -101,12 +100,27 @@ pub fn wait(num_replicas: usize, timeout: usize) -> Bytes {
     .into()
 }
 
+pub fn config(section: &ConfigSection) -> Bytes {
+    let mut values = vec![bulk_string("CONFIG")];
+    match section {
+        ConfigSection::Get { keys } => {
+            values.push(bulk_string("GET"));
+            for key in keys {
+                values.push(bulk_string(key));
+            }
+        }
+    }
+
+    array(values).into()
+}
+
 impl From<&RedisCommand> for Bytes {
     fn from(command: &RedisCommand) -> Self {
         match command {
             RedisCommand::Store(command) => command.into(),
             RedisCommand::Server(command) => command.into(),
             RedisCommand::Replication(command) => command.into(),
+            RedisCommand::Persistence(command) => command.into(),
         }
     }
 }
@@ -153,6 +167,14 @@ impl From<&RedisReplicationCommand> for Bytes {
                 num_replicas,
                 timeout,
             } => wait(*num_replicas, *timeout),
+        }
+    }
+}
+
+impl From<&RedisPersistenceCommand> for Bytes {
+    fn from(command: &RedisPersistenceCommand) -> Self {
+        match command {
+            RedisPersistenceCommand::Config { section } => config(section),
         }
     }
 }

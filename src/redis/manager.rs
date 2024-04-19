@@ -6,7 +6,8 @@ use tokio::sync::mpsc;
 use crate::redis::resp::command::{RedisCommand, RedisServerCommand};
 
 use super::{
-    replication::{RedisReplicationMode, RedisReplicator},
+    rdb::{RDBConfig, RDBPesistence},
+    replication::{RedisReplication, RedisReplicationMode},
     resp::encoding,
     server::{ClientConnectionInfo, RedisReadStream, RedisServer, RedisWriteStream},
     store::RedisStore,
@@ -33,21 +34,24 @@ impl RedisCommandPacket {
 }
 
 pub struct RedisManager {
-    store: RedisStore,
-    replicator: RedisReplicator,
     address: SocketAddr,
+    store: RedisStore,
+    replication: RedisReplication,
+    persistence: RDBPesistence,
 }
 
 impl RedisManager {
     pub fn new(
+        address: SocketAddr,
         store: RedisStore,
         replication_mode: RedisReplicationMode,
-        address: SocketAddr,
+        rdb_config: RDBConfig,
     ) -> Self {
         Self {
-            store,
-            replicator: RedisReplicator::new(address, replication_mode),
             address,
+            store,
+            replication: RedisReplication::new(address, replication_mode),
+            persistence: RDBPesistence::new(rdb_config),
         }
     }
 
@@ -56,7 +60,7 @@ impl RedisManager {
         let server = RedisServer::start(self.address).await?;
         eprintln!("[redis] server started at {}", self.address);
 
-        self.replicator.setup(command_tx.clone()).await?;
+        self.replication.setup(command_tx.clone()).await?;
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
             client_info,
@@ -70,7 +74,7 @@ impl RedisManager {
                     self.store.handle(command, &mut output)?;
                     write_stream.write(output.into_inner().freeze()).await?;
                     if command.is_write() {
-                        self.replicator.try_replicate(command.into()).await?;
+                        self.replication.try_replicate(command.into()).await?;
                     }
                 }
                 RedisCommand::Server(RedisServerCommand::Ping) => self.ping(write_stream).await?,
@@ -78,13 +82,18 @@ impl RedisManager {
                     self.echo(message.clone(), write_stream).await?
                 }
                 RedisCommand::Replication(command) => {
-                    self.replicator
+                    self.replication
                         .handle_command(client_info, command, write_stream)
+                        .await?
+                }
+                RedisCommand::Persistence(command) => {
+                    self.persistence
+                        .handle_command(command, write_stream)
                         .await?
                 }
             }
 
-            self.replicator.post_command_hook(&command);
+            self.replication.post_command_hook(&command);
         }
 
         Ok(())
