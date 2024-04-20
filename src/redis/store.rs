@@ -74,4 +74,10 @@ impl RedisStore {
             }
         }
     }
+
+    pub fn merge(&mut self, other: RedisStore) {
+        for (key, value) in other.items {
+            self.items.insert(key, value);
+        }
+    }
 }

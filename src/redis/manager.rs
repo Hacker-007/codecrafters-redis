@@ -60,7 +60,8 @@ impl RedisManager {
         let server = RedisServer::start(self.address).await?;
         eprintln!("[redis] server started at {}", self.address);
 
-        self.rdb_persistence.setup().await?;
+        let rdb_store = self.rdb_persistence.setup().await?;
+        self.store.merge(rdb_store);
         self.replication.setup(command_tx.clone()).await?;
         self.setup_client_connection_handling(server, command_tx);
         while let Some(RedisCommandPacket {
