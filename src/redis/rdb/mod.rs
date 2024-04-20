@@ -39,8 +39,7 @@ impl RDBPesistence {
         let mut buf = BytesMut::new();
         let rdb_file = std::fs::read(path)?;
         buf.extend_from_slice(&rdb_file);
-        let version = self.parse_magic_header(&mut buf)?;
-        eprintln!("[redis] found RDB with version {version}");
+        let _ = self.parse_magic_header(&mut buf)?;
         loop {
             let op_code = buf.get_u8();
             match op_code {
@@ -72,7 +71,9 @@ impl RDBPesistence {
                         &mut std::io::sink(),
                     )?;
                 }
-                0xFE => self.parse_database_selector(&mut buf)?,
+                0xFE => {
+                    self.parse_database_selector(&mut buf)?;
+                }
                 0xFF => break,
                 value_encoding => {
                     let (key, value) = self.parse_value(value_encoding, &mut buf)?;
@@ -119,7 +120,7 @@ impl RDBPesistence {
         &mut self,
         buf: &mut BytesMut,
     ) -> anyhow::Result<(SystemTime, Bytes, Bytes)> {
-        let expiry_timestamp = buf.get_u64();
+        let expiry_timestamp = buf.get_u64_le();
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(expiry_timestamp);
         let (key, value) = self.parse_value(buf.get_u8(), buf)?;
         Ok((expiry_timestamp, key, value))
@@ -129,20 +130,20 @@ impl RDBPesistence {
         &mut self,
         buf: &mut BytesMut,
     ) -> anyhow::Result<(SystemTime, Bytes, Bytes)> {
-        let expiry_timestamp = buf.get_u32() as u64;
+        let expiry_timestamp = buf.get_u32_le() as u64;
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(expiry_timestamp);
         let (key, value) = self.parse_value(buf.get_u8(), buf)?;
         Ok((expiry_timestamp, key, value))
     }
 
-    fn parse_database_selector(&mut self, buf: &mut BytesMut) -> anyhow::Result<()> {
+    fn parse_database_selector(&mut self, buf: &mut BytesMut) -> anyhow::Result<usize> {
         let (db_number, is_encoded) = self.parse_length(buf);
         anyhow::ensure!(
             !is_encoded,
             "[redis - error] expected database selector to not be an specially-encoded string"
         );
-        eprintln!("RDB database number: {db_number}");
-        Ok(())
+
+        Ok(db_number)
     }
 
     fn parse_value(

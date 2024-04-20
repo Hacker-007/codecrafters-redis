@@ -120,7 +120,9 @@ impl RedisManager {
                     if &**key == b"dir" {
                         values.push(encoding::bulk_string(&self.rdb_persistence.config.dir));
                     } else if &**key == b"dbfilename" {
-                        values.push(encoding::bulk_string(&self.rdb_persistence.config.file_name));
+                        values.push(encoding::bulk_string(
+                            &self.rdb_persistence.config.file_name,
+                        ));
                     } else {
                         return Err(anyhow::anyhow!(
                             "[redis - error] unexpected configuration key found"

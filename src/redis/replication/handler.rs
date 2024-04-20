@@ -11,7 +11,7 @@ use crate::redis::{
 use super::{
     acker::Acker,
     command::{InfoSection, RedisReplicationCommand, ReplConfSection},
-    RedisReplicationMode, RedisReplication, ReplicaInfo,
+    RedisReplication, RedisReplicationMode, ReplicaInfo,
 };
 
 const EMPTY_RDB_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
@@ -49,7 +49,8 @@ impl RedisReplication {
                 num_replicas,
                 timeout,
             } => {
-                self.wait(client_info, *num_replicas, *timeout, write_stream).await?;
+                self.wait(client_info, *num_replicas, *timeout, write_stream)
+                    .await?;
             }
         }
 
@@ -195,7 +196,6 @@ impl RedisReplication {
                 })
                 .await;
 
-                
                 client_info.is_read_blocked.store(false, Ordering::SeqCst);
                 let replica_count: i64 = acked_replicas.try_into()?;
                 write_stream.write(encoding::integer(replica_count)).await

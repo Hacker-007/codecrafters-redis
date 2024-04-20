@@ -34,13 +34,13 @@ async fn main() -> anyhow::Result<()> {
         args.next()
             .expect("[redis - error] value expected for RDB directory")
     })
-    .unwrap_or("./".to_string());
+    .unwrap_or_else(|| "./".to_string());
 
     let rdb_file_name = parse_option("--dbfilename", |mut args| {
         args.next()
             .expect("[redis - error] value expected for RDB file name")
     })
-    .unwrap_or("dump.rdb".to_string());
+    .unwrap_or_else(|| "dump.rdb".to_string());
 
     let mode = if let Some((primary_host, primary_port)) = replication_mode {
         let primary_port = primary_port.parse()?;
