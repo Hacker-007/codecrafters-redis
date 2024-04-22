@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 
 use crate::redis::resp::command::RedisStoreCommand;
 
@@ -43,49 +43,13 @@ impl RDBPesistence {
         loop {
             let op_code = buf.get_u8();
             match op_code {
-                0xFA => {
-                    self.parse_aux_fields(&mut buf)?;
-                }
-                0xFB => {
-                    self.parse_resize_db(&mut buf)?;
-                }
-                0xFC => {
-                    let (px, key, value) = self.parse_expiry_milliseconds(&mut buf)?;
-                    store.handle(
-                        &RedisStoreCommand::Set {
-                            key,
-                            value,
-                            px: Some(px),
-                        },
-                        &mut std::io::sink(),
-                    )?;
-                }
-                0xFD => {
-                    let (px, key, value) = self.parse_expiry_seconds(&mut buf)?;
-                    store.handle(
-                        &RedisStoreCommand::Set {
-                            key,
-                            value,
-                            px: Some(px),
-                        },
-                        &mut std::io::sink(),
-                    )?;
-                }
-                0xFE => {
-                    self.parse_database_selector(&mut buf)?;
-                }
+                0xFA => self.parse_aux_fields(&mut buf),
+                0xFB => self.parse_resize_db(&mut buf),
+                0xFC => self.parse_expiry_milliseconds(&mut store, &mut buf)?,
+                0xFD => self.parse_expiry_seconds(&mut store, &mut buf)?,
+                0xFE => self.parse_database_selector(&mut buf)?,
                 0xFF => break,
-                value_encoding => {
-                    let (key, value) = self.parse_value(value_encoding, &mut buf)?;
-                    store.handle(
-                        &RedisStoreCommand::Set {
-                            key,
-                            value,
-                            px: None,
-                        },
-                        &mut std::io::sink(),
-                    )?;
-                }
+                value_encoding => self.parse_value(value_encoding, None, &mut store, &mut buf)?,
             }
         }
 
@@ -104,53 +68,55 @@ impl RDBPesistence {
         Ok(version)
     }
 
-    fn parse_aux_fields(&mut self, buf: &mut BytesMut) -> anyhow::Result<(RESPValue, RESPValue)> {
-        let key = self.parse_string(buf);
-        let value = self.parse_string(buf);
-        Ok((key, value))
+    fn parse_aux_fields(&mut self, buf: &mut BytesMut) {
+        let _ = self.parse_string(buf);
+        let _ = self.parse_string(buf);
     }
 
-    fn parse_resize_db(&mut self, buf: &mut BytesMut) -> anyhow::Result<(usize, usize)> {
-        let (db_hash_table_size, _) = self.parse_length(buf);
-        let (expiry_hash_table_size, _) = self.parse_length(buf);
-        Ok((db_hash_table_size, expiry_hash_table_size))
+    fn parse_resize_db(&mut self, buf: &mut BytesMut) {
+        let _ = self.parse_length(buf);
+        let _ = self.parse_length(buf);
     }
 
     fn parse_expiry_milliseconds(
         &mut self,
+        store: &mut RedisStore,
         buf: &mut BytesMut,
-    ) -> anyhow::Result<(SystemTime, Bytes, Bytes)> {
+    ) -> anyhow::Result<()> {
         let expiry_timestamp = buf.get_u64_le();
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(expiry_timestamp);
-        let (key, value) = self.parse_value(buf.get_u8(), buf)?;
-        Ok((expiry_timestamp, key, value))
+        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf)?;
+        Ok(())
     }
 
     fn parse_expiry_seconds(
         &mut self,
+        store: &mut RedisStore,
         buf: &mut BytesMut,
-    ) -> anyhow::Result<(SystemTime, Bytes, Bytes)> {
+    ) -> anyhow::Result<()> {
         let expiry_timestamp = buf.get_u32_le() as u64;
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(expiry_timestamp);
-        let (key, value) = self.parse_value(buf.get_u8(), buf)?;
-        Ok((expiry_timestamp, key, value))
+        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf)?;
+        Ok(())
     }
 
-    fn parse_database_selector(&mut self, buf: &mut BytesMut) -> anyhow::Result<usize> {
-        let (db_number, is_encoded) = self.parse_length(buf);
+    fn parse_database_selector(&mut self, buf: &mut BytesMut) -> anyhow::Result<()> {
+        let (_, is_encoded) = self.parse_length(buf);
         anyhow::ensure!(
             !is_encoded,
             "[redis - error] expected database selector to not be an specially-encoded string"
         );
 
-        Ok(db_number)
+        Ok(())
     }
 
     fn parse_value(
         &mut self,
         value_encoding: u8,
+        px: Option<SystemTime>,
+        store: &mut RedisStore,
         buf: &mut BytesMut,
-    ) -> anyhow::Result<(Bytes, Bytes)> {
+    ) -> anyhow::Result<()> {
         let key = self
             .parse_string(buf)
             .into_bulk_string()
@@ -165,7 +131,12 @@ impl RDBPesistence {
             anyhow::anyhow!("[redis - error] only bulk strings are supported for RDB values")
         })?;
 
-        Ok((key, value))
+        store.handle(
+            &RedisStoreCommand::Set { key, value, px },
+            &mut std::io::sink(),
+        )?;
+
+        Ok(())
     }
 
     fn parse_string(&mut self, buf: &mut BytesMut) -> RESPValue {
