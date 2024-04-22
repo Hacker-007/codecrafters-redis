@@ -30,6 +30,9 @@ pub enum RedisStoreCommand {
     Keys {
         key: Bytes,
     },
+    Type {
+        key: Bytes,
+    }
 }
 
 impl RedisStoreCommand {
@@ -142,6 +145,10 @@ impl TryFrom<RESPValue> for RedisCommand {
             b"keys" => {
                 let key = parser.expect_arg("keys", "key")?;
                 Ok(RedisCommand::Store(RedisStoreCommand::Keys { key }))
+            }
+            b"type" => {
+                let key = parser.expect_arg("type", "key")?;
+                Ok(RedisCommand::Store(RedisStoreCommand::Type { key }))
             }
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser

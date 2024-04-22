@@ -32,6 +32,10 @@ pub fn keys(key: &Bytes) -> Bytes {
     array(vec![bulk_string("KEYS"), bulk_string(key)]).into()
 }
 
+pub fn ty(key: &Bytes) -> Bytes {
+    array(vec![bulk_string("TYPE"), bulk_string(key)]).into()
+}
+
 pub fn ping() -> Bytes {
     array(vec![bulk_string("PING")]).into()
 }
@@ -135,6 +139,7 @@ impl From<&RedisStoreCommand> for Bytes {
             RedisStoreCommand::Get { key } => get(key),
             RedisStoreCommand::Set { key, value, px } => set(key, value, px.as_ref()),
             RedisStoreCommand::Keys { key } => keys(key),
+            RedisStoreCommand::Type { key } => ty(key),
         }
     }
 }

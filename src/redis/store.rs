@@ -61,8 +61,7 @@ impl RedisStore {
             RedisStoreCommand::Keys { key } => {
                 if &**key == b"*" {
                     let keys = self.items.keys().map(encoding::bulk_string).collect();
-
-                    let bytes: Bytes = Bytes::from(encoding::array(keys));
+                    let bytes = Bytes::from(encoding::array(keys));
                     output_writer.write_all(&bytes)?;
                     Ok(())
                 } else {
@@ -70,6 +69,15 @@ impl RedisStore {
                         "[redis - error] unknown key pattern found for command 'KEYS'"
                     ))
                 }
+            }
+            RedisStoreCommand::Type { key } => {
+                let bytes = match self.items.get(key) {
+                    Some(_) => Bytes::from(encoding::simple_string(b"string")),
+                    None => Bytes::from(encoding::simple_string(b"none")),
+                };
+
+                output_writer.write_all(&bytes)?;
+                Ok(())
             }
         }
     }
