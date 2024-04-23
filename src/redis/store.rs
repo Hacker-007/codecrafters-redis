@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::SystemTime,
+};
 
 use bytes::Bytes;
 
@@ -10,9 +13,14 @@ use super::{
 type StoreKey = Bytes;
 
 #[derive(Debug)]
-pub struct StoreValue {
-    value: Bytes,
-    expiration: Option<SystemTime>,
+pub enum StoreValue {
+    String {
+        value: Bytes,
+        expiration: Option<SystemTime>,
+    },
+    Stream {
+        entries: BTreeMap<Bytes, Vec<(Bytes, Bytes)>>,
+    },
 }
 
 #[derive(Debug)]
@@ -35,14 +43,15 @@ impl RedisStore {
         match command {
             RedisStoreCommand::Get { key } => {
                 let value = match self.items.get(key) {
-                    Some(StoreValue {
+                    Some(StoreValue::String {
                         expiration: Some(expiration),
                         ..
                     }) if *expiration <= SystemTime::now() => {
                         self.items.remove(key);
                         encoding::null_bulk_string()
                     }
-                    Some(StoreValue { value, .. }) => encoding::bulk_string(value),
+                    Some(StoreValue::String { value, .. }) => encoding::bulk_string(value),
+                    Some(StoreValue::Stream { .. }) => return Err(anyhow::anyhow!("[redis - error] attempted to get value from stream using `GET` instead of `XREAD`")),
                     _ => encoding::null_bulk_string(),
                 };
 
@@ -52,7 +61,7 @@ impl RedisStore {
             RedisStoreCommand::Set { key, value, px } => {
                 self.items.insert(
                     key.clone(),
-                    StoreValue {
+                    StoreValue::String {
                         value: value.clone(),
                         expiration: px.as_ref().copied(),
                     },
@@ -74,7 +83,8 @@ impl RedisStore {
             }
             RedisStoreCommand::Type { key } => {
                 let value = match self.items.get(key) {
-                    Some(_) => encoding::simple_string(b"string"),
+                    Some(StoreValue::String { .. }) => encoding::simple_string(b"string"),
+                    Some(StoreValue::Stream { .. }) => encoding::simple_string(b"stream"),
                     None => encoding::simple_string(b"none"),
                 };
 
@@ -84,10 +94,20 @@ impl RedisStore {
             RedisStoreCommand::XAdd {
                 key,
                 entry_id,
-                entries,
+                fields,
             } => {
-                eprintln!("[redis] Got XADD command with key = {key:?} id = {entry_id:?} entries = {entries:?}");
-                Ok(())
+                let stream = self.items
+                    .entry(key.clone())
+                    .or_insert_with(|| StoreValue::Stream {
+                        entries: BTreeMap::default(),
+                    });
+
+                if let StoreValue::Stream { entries } = stream {
+                    entries.insert(entry_id.clone(), fields.clone());
+                    write_stream.write(encoding::bulk_string(entry_id)).await
+                } else {
+                    Err(anyhow::anyhow!("[redis - error] expected key to reference stream"))
+                }
             }
         }
     }

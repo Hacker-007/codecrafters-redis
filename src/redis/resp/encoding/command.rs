@@ -39,14 +39,14 @@ pub fn ty(key: &Bytes) -> Bytes {
 pub fn xadd(
     key: impl AsRef<[u8]>,
     entry_id: impl AsRef<[u8]>,
-    entries: &[(impl AsRef<[u8]>, impl AsRef<[u8]>)],
+    fields: &[(impl AsRef<[u8]>, impl AsRef<[u8]>)],
 ) -> Bytes {
     let mut values = vec![bulk_string("XADD"), bulk_string(key), bulk_string(entry_id)];
-    for (field, value) in entries {
-        values.push(bulk_string(field));    
-        values.push(bulk_string(value));    
+    for (field, value) in fields {
+        values.push(bulk_string(field));
+        values.push(bulk_string(value));
     }
-    
+
     array(values).into()
 }
 
@@ -157,8 +157,8 @@ impl From<&RedisStoreCommand> for Bytes {
             RedisStoreCommand::XAdd {
                 key,
                 entry_id,
-                entries,
-            } => xadd(key, entry_id, entries),
+                fields,
+            } => xadd(key, entry_id, fields),
         }
     }
 }

@@ -36,8 +36,8 @@ pub enum RedisStoreCommand {
     XAdd {
         key: Bytes,
         entry_id: Bytes,
-        entries: Vec<(Bytes, Bytes)>,
-    }
+        fields: Vec<(Bytes, Bytes)>,
+    },
 }
 
 impl RedisStoreCommand {
@@ -162,14 +162,18 @@ impl TryFrom<RESPValue> for RedisCommand {
             b"xadd" => {
                 let key = parser.expect_arg("xadd", "key")?;
                 let entry_id = parser.expect_arg("xadd", "id")?;
-                let mut entries = vec![];
+                let mut fields = vec![];
                 while !parser.is_finished() {
                     let field = parser.expect_arg("xadd", "field")?;
                     let value = parser.expect_arg("xadd", "value")?;
-                    entries.push((field, value));
+                    fields.push((field, value));
                 }
 
-                Ok(RedisCommand::Store(RedisStoreCommand::XAdd { key, entry_id, entries }))
+                Ok(RedisCommand::Store(RedisStoreCommand::XAdd {
+                    key,
+                    entry_id,
+                    fields,
+                }))
             }
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser
