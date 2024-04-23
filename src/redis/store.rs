@@ -1,8 +1,11 @@
-use std::{collections::HashMap, io::Write, time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
 use bytes::Bytes;
 
-use super::resp::{command::RedisStoreCommand, encoding};
+use super::{
+    resp::{command::RedisStoreCommand, encoding},
+    server::RedisWriteStream,
+};
 
 type StoreKey = Bytes;
 
@@ -24,10 +27,10 @@ impl RedisStore {
         }
     }
 
-    pub fn handle(
+    pub async fn handle(
         &mut self,
         command: &RedisStoreCommand,
-        output_writer: &mut impl Write,
+        write_stream: RedisWriteStream,
     ) -> anyhow::Result<()> {
         match command {
             RedisStoreCommand::Get { key } => {
@@ -43,7 +46,7 @@ impl RedisStore {
                     _ => encoding::null_bulk_string(),
                 };
 
-                output_writer.write_all(&Bytes::from(value))?;
+                write_stream.write(value).await?;
                 Ok(())
             }
             RedisStoreCommand::Set { key, value, px } => {
@@ -55,14 +58,13 @@ impl RedisStore {
                     },
                 );
 
-                output_writer.write_all(b"+OK\r\n")?;
+                write_stream.write(Bytes::from_static(b"+OK\r\n")).await?;
                 Ok(())
             }
             RedisStoreCommand::Keys { key } => {
                 if &**key == b"*" {
                     let keys = self.items.keys().map(encoding::bulk_string).collect();
-                    let bytes = Bytes::from(encoding::array(keys));
-                    output_writer.write_all(&bytes)?;
+                    write_stream.write(encoding::array(keys)).await?;
                     Ok(())
                 } else {
                     Err(anyhow::anyhow!(
@@ -71,12 +73,12 @@ impl RedisStore {
                 }
             }
             RedisStoreCommand::Type { key } => {
-                let bytes = match self.items.get(key) {
-                    Some(_) => Bytes::from(encoding::simple_string(b"string")),
-                    None => Bytes::from(encoding::simple_string(b"none")),
+                let value = match self.items.get(key) {
+                    Some(_) => encoding::simple_string(b"string"),
+                    None => encoding::simple_string(b"none"),
                 };
 
-                output_writer.write_all(&bytes)?;
+                write_stream.write(value).await?;
                 Ok(())
             }
         }

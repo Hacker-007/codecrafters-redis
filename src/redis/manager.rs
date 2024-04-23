@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use tokio::sync::mpsc;
 
 use crate::redis::resp::command::{RedisCommand, RedisServerCommand};
@@ -72,9 +72,7 @@ impl RedisManager {
         {
             match &command {
                 RedisCommand::Store(command) => {
-                    let mut output = BytesMut::with_capacity(2048).writer();
-                    self.store.handle(command, &mut output)?;
-                    write_stream.write(output.into_inner().freeze()).await?;
+                    self.store.handle(command, write_stream).await?;
                     if command.is_write() {
                         self.replication.try_replicate(command.into()).await?;
                     }

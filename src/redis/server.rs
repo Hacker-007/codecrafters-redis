@@ -69,6 +69,15 @@ impl RedisWriteStream {
             tx,
         }
     }
+
+    pub fn sink() -> Self {
+        let (tx, mut rx) = mpsc::channel(32);
+        tokio::spawn(async move {
+            while rx.recv().await.is_some() {}
+        });
+        
+        Self::new(tx)
+    }
 }
 
 impl RedisWriteStream {

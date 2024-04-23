@@ -7,7 +7,7 @@ use bytes::{Buf, BytesMut};
 
 use crate::redis::resp::command::RedisStoreCommand;
 
-use super::{resp::RESPValue, store::RedisStore};
+use super::{resp::RESPValue, server::RedisWriteStream, store::RedisStore};
 
 pub struct RDBConfig {
     pub dir: String,
@@ -45,11 +45,11 @@ impl RDBPesistence {
             match op_code {
                 0xFA => self.parse_aux_fields(&mut buf),
                 0xFB => self.parse_resize_db(&mut buf),
-                0xFC => self.parse_expiry_milliseconds(&mut store, &mut buf)?,
-                0xFD => self.parse_expiry_seconds(&mut store, &mut buf)?,
+                0xFC => self.parse_expiry_milliseconds(&mut store, &mut buf).await?,
+                0xFD => self.parse_expiry_seconds(&mut store, &mut buf).await?,
                 0xFE => self.parse_database_selector(&mut buf)?,
                 0xFF => break,
-                value_encoding => self.parse_value(value_encoding, None, &mut store, &mut buf)?,
+                value_encoding => self.parse_value(value_encoding, None, &mut store, &mut buf).await?,
             }
         }
 
@@ -78,25 +78,25 @@ impl RDBPesistence {
         let _ = self.parse_length(buf);
     }
 
-    fn parse_expiry_milliseconds(
+    async fn parse_expiry_milliseconds(
         &mut self,
         store: &mut RedisStore,
         buf: &mut BytesMut,
     ) -> anyhow::Result<()> {
         let expiry_timestamp = buf.get_u64_le();
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(expiry_timestamp);
-        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf)?;
+        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf).await?;
         Ok(())
     }
 
-    fn parse_expiry_seconds(
+    async fn parse_expiry_seconds(
         &mut self,
         store: &mut RedisStore,
         buf: &mut BytesMut,
     ) -> anyhow::Result<()> {
         let expiry_timestamp = buf.get_u32_le() as u64;
         let expiry_timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(expiry_timestamp);
-        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf)?;
+        let _ = self.parse_value(buf.get_u8(), Some(expiry_timestamp), store, buf).await?;
         Ok(())
     }
 
@@ -110,7 +110,7 @@ impl RDBPesistence {
         Ok(())
     }
 
-    fn parse_value(
+    async fn parse_value(
         &mut self,
         value_encoding: u8,
         px: Option<SystemTime>,
@@ -133,8 +133,8 @@ impl RDBPesistence {
 
         store.handle(
             &RedisStoreCommand::Set { key, value, px },
-            &mut std::io::sink(),
-        )?;
+            RedisWriteStream::sink(),
+        ).await?;
 
         Ok(())
     }
