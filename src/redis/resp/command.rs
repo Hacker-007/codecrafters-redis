@@ -32,6 +32,11 @@ pub enum RedisStoreCommand {
     },
     Type {
         key: Bytes,
+    },
+    XAdd {
+        key: Bytes,
+        entry_id: Bytes,
+        entries: Vec<(Bytes, Bytes)>,
     }
 }
 
@@ -96,6 +101,10 @@ impl CommandParser {
     fn attempt_flag<T>(&mut self, mapper: impl Fn(&[u8]) -> Option<T>) -> Option<T> {
         self.parts.last().and_then(|arg| mapper(arg))
     }
+
+    fn is_finished(&self) -> bool {
+        self.parts.is_empty()
+    }
 }
 
 impl TryFrom<RESPValue> for RedisCommand {
@@ -149,6 +158,18 @@ impl TryFrom<RESPValue> for RedisCommand {
             b"type" => {
                 let key = parser.expect_arg("type", "key")?;
                 Ok(RedisCommand::Store(RedisStoreCommand::Type { key }))
+            }
+            b"xadd" => {
+                let key = parser.expect_arg("xadd", "key")?;
+                let entry_id = parser.expect_arg("xadd", "id")?;
+                let mut entries = vec![];
+                while !parser.is_finished() {
+                    let field = parser.expect_arg("xadd", "field")?;
+                    let value = parser.expect_arg("xadd", "value")?;
+                    entries.push((field, value));
+                }
+
+                Ok(RedisCommand::Store(RedisStoreCommand::XAdd { key, entry_id, entries }))
             }
             b"ping" => Ok(RedisCommand::Server(RedisServerCommand::Ping)),
             b"echo" => parser

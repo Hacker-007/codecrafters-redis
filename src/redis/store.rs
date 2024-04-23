@@ -81,6 +81,14 @@ impl RedisStore {
                 write_stream.write(value).await?;
                 Ok(())
             }
+            RedisStoreCommand::XAdd {
+                key,
+                entry_id,
+                entries,
+            } => {
+                eprintln!("[redis] Got XADD command with key = {key:?} id = {entry_id:?} entries = {entries:?}");
+                Ok(())
+            }
         }
     }
 

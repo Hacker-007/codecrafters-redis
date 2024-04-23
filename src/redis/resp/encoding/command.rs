@@ -36,6 +36,20 @@ pub fn ty(key: &Bytes) -> Bytes {
     array(vec![bulk_string("TYPE"), bulk_string(key)]).into()
 }
 
+pub fn xadd(
+    key: impl AsRef<[u8]>,
+    entry_id: impl AsRef<[u8]>,
+    entries: &[(impl AsRef<[u8]>, impl AsRef<[u8]>)],
+) -> Bytes {
+    let mut values = vec![bulk_string("XADD"), bulk_string(key), bulk_string(entry_id)];
+    for (field, value) in entries {
+        values.push(bulk_string(field));    
+        values.push(bulk_string(value));    
+    }
+    
+    array(values).into()
+}
+
 pub fn ping() -> Bytes {
     array(vec![bulk_string("PING")]).into()
 }
@@ -140,6 +154,11 @@ impl From<&RedisStoreCommand> for Bytes {
             RedisStoreCommand::Set { key, value, px } => set(key, value, px.as_ref()),
             RedisStoreCommand::Keys { key } => keys(key),
             RedisStoreCommand::Type { key } => ty(key),
+            RedisStoreCommand::XAdd {
+                key,
+                entry_id,
+                entries,
+            } => xadd(key, entry_id, entries),
         }
     }
 }
