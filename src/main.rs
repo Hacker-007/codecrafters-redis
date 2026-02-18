@@ -3,11 +3,14 @@ use std::net::IpAddr;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::info;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::EnvFilter;
 
 use crate::error::RedisResult;
 
+#[allow(unused)]
 mod error;
+#[allow(unused)]
+mod resp;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -27,10 +30,8 @@ async fn main() -> RedisResult<()> {
     tracing_subscriber::fmt()
         .compact()
         .without_time()
-        .with_target(true)
         .with_file(true)
         .with_line_number(true)
-        .with_span_events(FmtSpan::NONE)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
