@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use crate::error::{RedisError, RedisResult};
+use crate::error::{DecodeError, RedisError, RedisResult};
 
 pub mod codec;
 pub mod encoding;
@@ -15,6 +15,12 @@ pub enum RESPValue {
     BulkString(Bytes),
     NullArray,
     Array(Vec<RESPValue>),
+}
+
+#[derive(Debug)]
+pub enum ClientMessage {
+    Command(RedisCommand),
+    Error(DecodeError),
 }
 
 #[derive(Debug, PartialEq, Eq)]

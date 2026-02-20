@@ -7,7 +7,7 @@ pub fn simple_string(bytes: impl Into<Bytes>) -> RESPValue {
 }
 
 pub fn simple_error(bytes: impl Into<Bytes>) -> RESPValue {
-    RESPValue::SimpleString(bytes.into())
+    RESPValue::SimpleError(bytes.into())
 }
 
 pub fn integer(value: impl Into<i64>) -> RESPValue {

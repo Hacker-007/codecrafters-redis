@@ -10,7 +10,7 @@ use crate::{
             check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
             CommandArgumentStream, Slot,
         },
-        RESPValue, RedisCommand, SetCondition, SetExpiration,
+        ClientMessage, RESPValue, RedisCommand, SetCondition, SetExpiration,
     },
 };
 
@@ -95,8 +95,9 @@ impl Decoder for RESPCodec {
             })?;
         }
 
-        try_incomplete!(self.check(src, 0, 0));
-        Ok(Some(self.parse(src)))
+        let end = try_incomplete!(self.check(src, 0, 0));
+        let mut frame = src.split_to(end);
+        Ok(Some(self.parse(&mut frame)))
     }
 }
 
@@ -293,7 +294,7 @@ impl Encoder<RedisCommand> for RedisCommandCodec {
 }
 
 impl Decoder for RedisCommandCodec {
-    type Item = RedisCommand;
+    type Item = ClientMessage;
     type Error = RedisError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -306,8 +307,17 @@ impl Decoder for RedisCommandCodec {
         }
 
         dbg!(&src);
-        try_incomplete!(self.check(src, 0));
-        self.parse(src).map(Some).map_err(Into::into)
+        let end = try_incomplete!(self.check(src, 0));
+
+        // Split the complete frame from `src` before parsing. This
+        // ensures the buffer stays clean even if `parse` fails
+        // partway through (e.g. unknown command), so the stream
+        // can continue decoding subsequent commands.
+        let mut frame = src.split_to(end);
+        Ok(Some(match self.parse(&mut frame) {
+            Ok(command) => ClientMessage::Command(command),
+            Err(err) => ClientMessage::Error(err),
+        }))
     }
 }
 

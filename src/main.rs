@@ -11,7 +11,7 @@ use crate::{
     error::RedisResult,
     resp::{
         codec::{RESPCodec, RedisCommandCodec},
-        encoding,
+        encoding, ClientMessage,
     },
 };
 
@@ -53,20 +53,32 @@ async fn main() -> RedisResult<()> {
         let mut read_half = FramedRead::new(read_half, RedisCommandCodec);
         let mut write_half = FramedWrite::new(write_half, RESPCodec);
         tokio::spawn(async move {
-            while let Some(command) = read_half.next().await {
-                tracing::info!("{command:#?}");
-                let response = encoding::simple_string(&b"OK"[..]);
+            while let Some(result) = read_half.next().await {
+                let message = match result {
+                    Ok(message) => message,
+                    Err(err) => {
+                        tracing::error!("{err}");
+                        break;
+                    }
+                };
+
+                let response = match message {
+                    ClientMessage::Command(command) => {
+                        tracing::info!("{command:#?}");
+                        encoding::simple_string(&b"OK"[..])
+                    }
+                    ClientMessage::Error(err) => {
+                        tracing::error!("{err}");
+                        encoding::simple_error(format!("ERR {err}").into_bytes())
+                    }
+                };
+
                 if let Err(err) = write_half.send(response).await {
                     tracing::error!("{err}");
                     break;
                 }
             }
 
-            // TODO:
-            // We should continue to keep the connection alive, even if
-            // there is an error. Currently, we drop the connection, forcing
-            // the client to reconnect. But if we do not drop, then how
-            // can we determine that the client dropped the connection?
             tracing::info!("dropped connection from {client_address}");
         });
     }
