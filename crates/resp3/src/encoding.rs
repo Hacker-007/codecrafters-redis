@@ -1,4 +1,4 @@
-use crate::resp::RESPValue;
+use crate::RESPValue;
 use bytes::{BufMut, Bytes, BytesMut};
 use itoa::Buffer;
 
@@ -37,7 +37,7 @@ pub fn null() -> RESPValue {
 /// or more bulk strings in the serialized
 /// format and typically represents a single
 /// option or flag.
-pub trait CommandPartEncoding {
+pub(crate) trait CommandPartEncoding {
     /// Encodes this part to the `dest` as
     /// a bulk string.
     fn encode(self, dest: &mut Vec<Bytes>);

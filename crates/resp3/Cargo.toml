@@ -1,0 +1,11 @@
+[package]
+name = "resp3"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1.3.0"
+memchr = "2"
+itoa = "1.0.17"
+thiserror = "1.0.32"
+tokio-util = { version = "0.7.18", features = ["codec"] }

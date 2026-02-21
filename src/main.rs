@@ -2,21 +2,18 @@ use std::net::IpAddr;
 
 use clap::Parser;
 use futures::SinkExt;
+use resp3::{
+    codec::{RESPCodec, RedisCommandCodec},
+    encoding, ClientMessage,
+};
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing_subscriber::EnvFilter;
 
-use crate::{
-    error::RedisResult,
-    resp::{
-        codec::{RESPCodec, RedisCommandCodec},
-        encoding, ClientMessage,
-    },
-};
+use crate::error::RedisResult;
 
 mod error;
-mod resp;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

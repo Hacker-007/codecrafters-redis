@@ -425,12 +425,10 @@ dependencies = [
 name = "redis"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "clap",
  "env_logger",
  "futures",
- "itoa",
- "memchr",
+ "resp3",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -476,6 +474,17 @@ name = "regex-syntax"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c"
+
+[[package]]
+name = "resp3"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "itoa",
+ "memchr",
+ "thiserror",
+ "tokio-util",
+]
 
 [[package]]
 name = "scopeguard"

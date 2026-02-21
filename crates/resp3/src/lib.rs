@@ -1,8 +1,9 @@
-use crate::{error::DecodeError, resp::encoding::CommandPartEncoding};
+use crate::{encoding::CommandPartEncoding, error::DecodeError};
 use bytes::Bytes;
 
 pub mod codec;
 pub mod encoding;
+pub mod error;
 mod parse;
 
 /// A RESP3-compliant value.
@@ -26,8 +27,20 @@ pub enum ClientMessage {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum RedisCommand {
+pub enum ConnectionCommand {
     Ping,
+}
+
+impl CommandPartEncoding for ConnectionCommand {
+    fn encode(self, dest: &mut Vec<Bytes>) {
+        match self {
+            ConnectionCommand::Ping => "PING".encode(dest),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum StringCommand {
     Get {
         key: Bytes,
     },
@@ -40,12 +53,11 @@ pub enum RedisCommand {
     },
 }
 
-impl CommandPartEncoding for RedisCommand {
+impl CommandPartEncoding for StringCommand {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
-            RedisCommand::Ping => "PING".encode(dest),
-            RedisCommand::Get { key } => ("GET", key).encode(dest),
-            RedisCommand::Set {
+            StringCommand::Get { key } => ("GET", key).encode(dest),
+            StringCommand::Set {
                 key,
                 value,
                 condition,
@@ -56,6 +68,21 @@ impl CommandPartEncoding for RedisCommand {
                 get.then(|| "GET".encode(dest));
                 expiration.encode(dest);
             }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RedisCommand {
+    Connection(ConnectionCommand),
+    String(StringCommand),
+}
+
+impl CommandPartEncoding for RedisCommand {
+    fn encode(self, dest: &mut Vec<Bytes>) {
+        match self {
+            RedisCommand::Connection(command) => command.encode(dest),
+            RedisCommand::String(command) => command.encode(dest),
         }
     }
 }

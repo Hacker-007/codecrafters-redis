@@ -3,15 +3,14 @@ use itoa::Buffer;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
-    error::{DecodeError, RedisError},
-    resp::{
-        encoding::CommandPartEncoding,
-        parse::{
-            check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
-            CommandArgumentStream, Slot,
-        },
-        ClientMessage, RESPValue, RedisCommand, SetCondition, SetExpiration,
+    encoding::CommandPartEncoding,
+    error::{DecodeError, RESPError},
+    parse::{
+        check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
+        CommandArgumentStream, Slot,
     },
+    ClientMessage, ConnectionCommand, RESPValue, RedisCommand, SetCondition, SetExpiration,
+    StringCommand,
 };
 
 // The maximum buffer size when decoding to
@@ -30,7 +29,7 @@ const MAX_ARRAY_LENGTH: i64 = 10_000;
 pub struct RESPCodec;
 
 impl Encoder<RESPValue> for RESPCodec {
-    type Error = RedisError;
+    type Error = RESPError;
 
     fn encode(&mut self, value: RESPValue, dest: &mut BytesMut) -> Result<(), Self::Error> {
         match value {
@@ -81,7 +80,7 @@ impl Encoder<RESPValue> for RESPCodec {
 
 impl Decoder for RESPCodec {
     type Item = RESPValue;
-    type Error = RedisError;
+    type Error = RESPError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
@@ -209,7 +208,7 @@ impl RESPCodec {
 pub struct RedisCommandCodec;
 
 impl Encoder<RedisCommand> for RedisCommandCodec {
-    type Error = RedisError;
+    type Error = RESPError;
 
     fn encode(&mut self, command: RedisCommand, dest: &mut BytesMut) -> Result<(), Self::Error> {
         let mut encoded_bytes = vec![];
@@ -236,7 +235,7 @@ impl Encoder<RedisCommand> for RedisCommandCodec {
 
 impl Decoder for RedisCommandCodec {
     type Item = ClientMessage;
-    type Error = RedisError;
+    type Error = RESPError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
@@ -366,7 +365,7 @@ impl RedisCommandCodec {
         let key = args.next()?;
         args.finish()?;
 
-        Ok(RedisCommand::Get { key })
+        Ok(RedisCommand::String(StringCommand::Get { key }))
     }
 
     /// Parses a `SET` command.
@@ -408,13 +407,13 @@ impl RedisCommandCodec {
         }
 
         args.finish()?;
-        Ok(RedisCommand::Set {
+        Ok(RedisCommand::String(StringCommand::Set {
             key,
             value,
             condition: condition.into_inner(),
             get: get.into_inner(),
             expiration: expiration.into_inner(),
-        })
+        }))
     }
 
     /// Parses a `PING` command.
@@ -423,6 +422,6 @@ impl RedisCommandCodec {
     /// for more information.
     fn parse_ping(&self, args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
         args.finish()?;
-        Ok(RedisCommand::Ping)
+        Ok(RedisCommand::Connection(ConnectionCommand::Ping))
     }
 }
