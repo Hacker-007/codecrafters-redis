@@ -1,6 +1,9 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use crate::error::{DecodeError, RedisError, RedisResult};
+use crate::{
+    error::{DecodeError, RedisError, RedisResult},
+    resp::encoding::CommandPartEncoding,
+};
 
 pub mod codec;
 pub mod encoding;
@@ -37,6 +40,25 @@ pub enum RedisCommand {
     },
 }
 
+impl CommandPartEncoding for RedisCommand {
+    fn encode(self, dest: &mut Vec<Bytes>) {
+        match self {
+            RedisCommand::Get { key } => ("GET", key).encode(dest),
+            RedisCommand::Set {
+                key,
+                value,
+                condition,
+                get,
+                expiration,
+            } => {
+                ("SET", key, value, condition).encode(dest);
+                get.then(|| "GET".encode(dest));
+                expiration.encode(dest);
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SetCondition {
     Nx,
@@ -47,6 +69,19 @@ pub enum SetCondition {
     IfDne(Bytes),
 }
 
+impl CommandPartEncoding for SetCondition {
+    fn encode(self, dest: &mut Vec<Bytes>) {
+        match self {
+            SetCondition::Nx => "NX".encode(dest),
+            SetCondition::Xx => "XX".encode(dest),
+            SetCondition::IfEq(bytes) => ("IFEQ", bytes).encode(dest),
+            SetCondition::IfNe(bytes) => ("IFNE", bytes).encode(dest),
+            SetCondition::IfDeq(bytes) => ("IFDEQ", bytes).encode(dest),
+            SetCondition::IfDne(bytes) => ("IFDNE", bytes).encode(dest),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SetExpiration {
     Ex(i64),
@@ -54,4 +89,16 @@ pub enum SetExpiration {
     ExAt(i64),
     PxAt(i64),
     KeepTtl,
+}
+
+impl CommandPartEncoding for SetExpiration {
+    fn encode(self, dest: &mut Vec<Bytes>) {
+        match self {
+            SetExpiration::Ex(seconds) => ("EX", seconds).encode(dest),
+            SetExpiration::Px(milliseconds) => ("PX", milliseconds).encode(dest),
+            SetExpiration::ExAt(timestamp) => ("EXAT", timestamp).encode(dest),
+            SetExpiration::PxAt(timestamp) => ("PXAT", timestamp).encode(dest),
+            SetExpiration::KeepTtl => "KEEPTTL".encode(dest),
+        }
+    }
 }

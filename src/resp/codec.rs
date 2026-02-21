@@ -5,7 +5,7 @@ use tokio_util::codec::{Decoder, Encoder};
 use crate::{
     error::{DecodeError, RedisError},
     resp::{
-        encoding,
+        encoding::{self, CommandPartEncoding},
         parse::{
             check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
             CommandArgumentStream, Slot,
@@ -224,72 +224,25 @@ impl Encoder<RedisCommand> for RedisCommandCodec {
     type Error = RedisError;
 
     fn encode(&mut self, command: RedisCommand, dest: &mut BytesMut) -> Result<(), Self::Error> {
-        let parts = match command {
-            RedisCommand::Get { key } => vec![
-                encoding::bulk_string(&b"GET"[..]),
-                encoding::bulk_string(key),
-            ],
-            RedisCommand::Set {
-                key,
-                value,
-                condition,
-                get,
-                expiration,
-            } => {
-                let mut parts = vec![];
-                parts.push(encoding::bulk_string(&b"SET"[..]));
-                parts.push(encoding::bulk_string(key));
-                parts.push(encoding::bulk_string(value));
-                match condition {
-                    Some(SetCondition::Nx) => parts.push(encoding::bulk_string(&b"NX"[..])),
-                    Some(SetCondition::Xx) => parts.push(encoding::bulk_string(&b"XX"[..])),
-                    Some(SetCondition::IfEq(bytes)) => parts.push(encoding::bulk_string(bytes)),
-                    Some(SetCondition::IfNe(bytes)) => parts.push(encoding::bulk_string(bytes)),
-                    Some(SetCondition::IfDeq(bytes)) => parts.push(encoding::bulk_string(bytes)),
-                    Some(SetCondition::IfDne(bytes)) => parts.push(encoding::bulk_string(bytes)),
-                    _ => {}
-                };
+        let mut encoded_bytes = vec![];
+        command.encode(&mut encoded_bytes);
 
-                if get {
-                    parts.push(encoding::bulk_string(&b"GET"[..]));
-                }
+        // Encode the length of the resulting array.
+        let length = encoded_bytes.len();
+        dest.put_u8(b'*');
+        dest.extend_from_slice(Buffer::new().format(length).as_bytes());
+        dest.extend_from_slice(b"\r\n");
 
-                match expiration {
-                    Some(SetExpiration::Ex(seconds)) => {
-                        let mut buf = Buffer::new();
-                        let seconds = buf.format(seconds).as_bytes().to_vec();
-                        parts.push(encoding::bulk_string(&b"EX"[..]));
-                        parts.push(encoding::bulk_string(seconds));
-                    }
-                    Some(SetExpiration::Px(milliseconds)) => {
-                        let mut buf = Buffer::new();
-                        let milliseconds = buf.format(milliseconds).as_bytes().to_vec();
-                        parts.push(encoding::bulk_string(&b"PX"[..]));
-                        parts.push(encoding::bulk_string(milliseconds));
-                    }
-                    Some(SetExpiration::ExAt(timestamp)) => {
-                        let mut buf = Buffer::new();
-                        let timestamp = buf.format(timestamp).as_bytes().to_vec();
-                        parts.push(encoding::bulk_string(&b"EXAT"[..]));
-                        parts.push(encoding::bulk_string(timestamp));
-                    }
-                    Some(SetExpiration::PxAt(timestamp)) => {
-                        let mut buf = Buffer::new();
-                        let timestamp = buf.format(timestamp).as_bytes().to_vec();
-                        parts.push(encoding::bulk_string(&b"PXAT"[..]));
-                        parts.push(encoding::bulk_string(timestamp));
-                    }
-                    Some(SetExpiration::KeepTtl) => {
-                        parts.push(encoding::bulk_string(&b"KEEPTTL"[..]))
-                    }
-                    _ => {}
-                };
+        // The parts of the command have already been encoded
+        // as a bulk string. So all that is left is to write them
+        // in `dest`.
+        let total_bytes = encoded_bytes.iter().map(Bytes::len).sum();
+        dest.reserve(total_bytes);
+        for bytes in encoded_bytes {
+            dest.extend_from_slice(&bytes);
+        }
 
-                parts
-            }
-        };
-
-        RESPCodec.encode(encoding::array(parts), dest)
+        Ok(())
     }
 }
 
@@ -306,7 +259,6 @@ impl Decoder for RedisCommandCodec {
             })?;
         }
 
-        dbg!(&src);
         let end = try_incomplete!(self.check(src, 0));
 
         // Split the complete frame from `src` before parsing. This
