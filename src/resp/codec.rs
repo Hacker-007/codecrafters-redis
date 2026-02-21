@@ -5,7 +5,7 @@ use tokio_util::codec::{Decoder, Encoder};
 use crate::{
     error::{DecodeError, RedisError},
     resp::{
-        encoding::{self, CommandPartEncoding},
+        encoding::CommandPartEncoding,
         parse::{
             check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
             CommandArgumentStream, Slot,
@@ -351,6 +351,8 @@ impl RedisCommandCodec {
             self.parse_get(args)
         } else if command.eq_ignore_ascii_case(b"SET") {
             self.parse_set(args)
+        } else if command.eq_ignore_ascii_case(b"PING") {
+            self.parse_ping(args)
         } else {
             Err(DecodeError::UnknownCommand { command })
         }
@@ -413,5 +415,14 @@ impl RedisCommandCodec {
             get: get.into_inner(),
             expiration: expiration.into_inner(),
         })
+    }
+
+    /// Parses a `PING` command.
+    ///
+    /// See [specification](https://redis.io/docs/latest/commands/ping/)
+    /// for more information.
+    fn parse_ping(&self, args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
+        args.finish()?;
+        Ok(RedisCommand::Ping)
     }
 }

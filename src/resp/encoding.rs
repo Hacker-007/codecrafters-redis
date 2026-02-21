@@ -1,8 +1,6 @@
+use crate::resp::RESPValue;
 use bytes::{BufMut, Bytes, BytesMut};
 use itoa::Buffer;
-use tokio_util::codec::Encoder;
-
-use crate::resp::{codec::RESPCodec, RESPValue};
 
 pub fn simple_string(bytes: impl Into<Bytes>) -> RESPValue {
     RESPValue::SimpleString(bytes.into())

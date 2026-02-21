@@ -15,9 +15,7 @@ use crate::{
     },
 };
 
-#[allow(unused)]
 mod error;
-#[allow(unused)]
 mod resp;
 
 #[derive(Parser)]

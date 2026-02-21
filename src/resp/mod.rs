@@ -1,16 +1,12 @@
-use bytes::{BufMut, Bytes, BytesMut};
-
-use crate::{
-    error::{DecodeError, RedisError, RedisResult},
-    resp::encoding::CommandPartEncoding,
-};
+use crate::{error::DecodeError, resp::encoding::CommandPartEncoding};
+use bytes::Bytes;
 
 pub mod codec;
 pub mod encoding;
 mod parse;
 
 /// A RESP3-compliant value.
-/// 
+///
 /// See the [specification](https://redis.io/docs/latest/develop/reference/protocol-spec/)
 /// for more details.
 #[derive(Debug, PartialEq, Eq)]
@@ -31,6 +27,7 @@ pub enum ClientMessage {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisCommand {
+    Ping,
     Get {
         key: Bytes,
     },
@@ -46,6 +43,7 @@ pub enum RedisCommand {
 impl CommandPartEncoding for RedisCommand {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
+            RedisCommand::Ping => "PING".encode(dest),
             RedisCommand::Get { key } => ("GET", key).encode(dest),
             RedisCommand::Set {
                 key,
