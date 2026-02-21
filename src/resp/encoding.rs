@@ -19,12 +19,13 @@ pub fn integer(value: impl Into<i64>) -> RESPValue {
 pub fn bulk_string(bytes: impl Into<Bytes>) -> RESPValue {
     RESPValue::BulkString(bytes.into())
 }
-pub fn null_bulk_string() -> RESPValue {
-    RESPValue::NullBulkString
-}
 
 pub fn array(values: Vec<RESPValue>) -> RESPValue {
     RESPValue::Array(values)
+}
+
+pub fn null() -> RESPValue {
+    RESPValue::Null
 }
 
 /// Encodes a part of a Redis command in

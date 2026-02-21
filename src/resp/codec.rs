@@ -22,7 +22,7 @@ const MAX_NESTING_DEPTH: usize = 100;
 const MAX_BULK_STRING_LENGTH: i64 = 2 * 1024 * 1024;
 const MAX_ARRAY_LENGTH: i64 = 10_000;
 
-/// A codec for the Redis serialization protocol (RESP2),
+/// A codec for the Redis serialization protocol (RESP3),
 /// used for communication between clients and servers.
 ///
 /// See the [specification](https://redis.io/docs/latest/develop/reference/protocol-spec/)
@@ -51,9 +51,6 @@ impl Encoder<RESPValue> for RESPCodec {
                 dest.extend_from_slice(value.as_bytes());
                 dest.extend_from_slice(b"\r\n");
             }
-            RESPValue::NullBulkString => {
-                dest.extend_from_slice(b"$-1\r\n");
-            }
             RESPValue::BulkString(bytes) => {
                 let mut buf = Buffer::new();
                 let length = buf.format(bytes.len());
@@ -62,9 +59,6 @@ impl Encoder<RESPValue> for RESPCodec {
                 dest.extend_from_slice(b"\r\n");
                 dest.put(bytes);
                 dest.extend_from_slice(b"\r\n");
-            }
-            RESPValue::NullArray => {
-                dest.extend_from_slice(b"*-1\r\n");
             }
             RESPValue::Array(values) => {
                 let mut buf = Buffer::new();
@@ -75,6 +69,9 @@ impl Encoder<RESPValue> for RESPCodec {
                 for value in values {
                     self.encode(value, dest)?;
                 }
+            }
+            RESPValue::Null => {
+                dest.extend_from_slice(b"_\r\n");
             }
         }
 
@@ -128,16 +125,13 @@ impl RESPCodec {
         let crlf_pos = pos + 1 + crlf_offset;
         let after_crlf_pos = crlf_pos + 2;
         match src[pos] {
-            b'+' | b'-' | b':' => Ok(Some(after_crlf_pos)),
+            b'+' | b'-' | b':' | b'_' => Ok(Some(after_crlf_pos)),
             b'$' => {
                 let length = check_i64(&src[pos + 1..crlf_pos])?;
-                if length == -1 {
-                    // We found a valid null bulk string.
-                    return Ok(Some(after_crlf_pos));
-                } else if !(-1..=MAX_BULK_STRING_LENGTH).contains(&length) {
+                if !(0..=MAX_BULK_STRING_LENGTH).contains(&length) {
                     return Err(DecodeError::InvalidLength {
                         length,
-                        min: -1,
+                        min: 0,
                         max: MAX_BULK_STRING_LENGTH,
                     });
                 }
@@ -151,13 +145,10 @@ impl RESPCodec {
             }
             b'*' => {
                 let length = check_i64(&src[pos + 1..crlf_pos])?;
-                if length == -1 {
-                    // We found a valid null array.
-                    return Ok(Some(after_crlf_pos));
-                } else if !(-1..=MAX_ARRAY_LENGTH).contains(&length) {
+                if !(0..=MAX_ARRAY_LENGTH).contains(&length) {
                     return Err(DecodeError::InvalidLength {
                         length,
-                        min: -1,
+                        min: 0,
                         max: MAX_ARRAY_LENGTH,
                     });
                 }
@@ -185,22 +176,19 @@ impl RESPCodec {
             b'+' => RESPValue::SimpleString(parse_line(src)),
             b'-' => RESPValue::SimpleError(parse_line(src)),
             b':' => RESPValue::Integer(parse_i64(src)),
+            b'_' => {
+                // Skip the `\r\n` characters.
+                src.advance(2);
+                RESPValue::Null
+            }
             b'$' => {
                 let length = parse_i64(src);
-                if length == -1 {
-                    return RESPValue::NullBulkString;
-                }
-
                 let data = src.split_to(length as usize);
                 src.advance(2);
                 RESPValue::BulkString(data.freeze())
             }
             b'*' => {
                 let length = parse_i64(src);
-                if length == -1 {
-                    return RESPValue::NullArray;
-                }
-
                 let mut values = Vec::with_capacity(length as usize);
                 for _ in 0..length {
                     values.push(self.parse(src));

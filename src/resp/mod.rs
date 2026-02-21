@@ -9,15 +9,18 @@ pub mod codec;
 pub mod encoding;
 mod parse;
 
+/// A RESP3-compliant value.
+/// 
+/// See the [specification](https://redis.io/docs/latest/develop/reference/protocol-spec/)
+/// for more details.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RESPValue {
     SimpleString(Bytes),
     SimpleError(Bytes),
     Integer(i64),
-    NullBulkString,
     BulkString(Bytes),
-    NullArray,
     Array(Vec<RESPValue>),
+    Null,
 }
 
 #[derive(Debug)]
