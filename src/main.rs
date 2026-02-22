@@ -1,19 +1,10 @@
-use std::net::IpAddr;
-
+use crate::{error::RedisResult, server::RedisServer};
 use clap::Parser;
-use futures::SinkExt;
-use resp3::{
-    codec::{RESPCodec, RedisCommandCodec},
-    encoding, ClientMessage,
-};
-use tokio::net::TcpListener;
-use tokio_stream::StreamExt;
-use tokio_util::codec::{FramedRead, FramedWrite};
+use std::net::IpAddr;
 use tracing_subscriber::EnvFilter;
 
-use crate::error::RedisResult;
-
 mod error;
+mod server;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -38,43 +29,6 @@ async fn main() -> RedisResult<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let listener = TcpListener::bind((args.host, args.port)).await?;
-    tracing::info!("server listening on {}:{}", args.host, args.port);
-
-    loop {
-        let (stream, client_address) = listener.accept().await?;
-        let (read_half, write_half) = stream.into_split();
-        tracing::info!("accepted connection from {client_address}");
-        let mut read_half = FramedRead::new(read_half, RedisCommandCodec);
-        let mut write_half = FramedWrite::new(write_half, RESPCodec);
-        tokio::spawn(async move {
-            while let Some(result) = read_half.next().await {
-                let message = match result {
-                    Ok(message) => message,
-                    Err(err) => {
-                        tracing::error!("{err}");
-                        break;
-                    }
-                };
-
-                let response = match message {
-                    ClientMessage::Command(command) => {
-                        tracing::info!("{command:#?}");
-                        encoding::simple_string(&b"OK"[..])
-                    }
-                    ClientMessage::Error(err) => {
-                        tracing::error!("{err}");
-                        encoding::simple_error(format!("ERR {err}").into_bytes())
-                    }
-                };
-
-                if let Err(err) = write_half.send(response).await {
-                    tracing::error!("{err}");
-                    break;
-                }
-            }
-
-            tracing::info!("dropped connection from {client_address}");
-        });
-    }
+    let mut server = RedisServer::new(args.host, args.port);
+    server.start().await
 }
