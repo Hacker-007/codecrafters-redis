@@ -91,9 +91,9 @@ impl Decoder for RESPCodec {
             })?;
         }
 
-        let end = try_incomplete!(self.check(src, 0, 0));
+        let end = try_incomplete!(Self::check(src, 0, 0));
         let mut frame = src.split_to(end);
-        Ok(Some(self.parse(&mut frame)))
+        Ok(Some(Self::parse(&mut frame)))
     }
 }
 
@@ -104,12 +104,7 @@ impl RESPCodec {
     /// Returns `Ok(Some(end))` where `src[pos..end]` is the
     /// complete deserialized value, `Ok(None)` if more data is
     /// needed, or `Err` on malformed input.
-    fn check(
-        &self,
-        src: &BytesMut,
-        pos: usize,
-        depth: usize,
-    ) -> Result<Option<usize>, DecodeError> {
+    fn check(src: &BytesMut, pos: usize, depth: usize) -> Result<Option<usize>, DecodeError> {
         if depth >= MAX_NESTING_DEPTH {
             return Err(DecodeError::TooDeep {
                 limit: MAX_NESTING_DEPTH,
@@ -154,7 +149,7 @@ impl RESPCodec {
 
                 let mut cursor_pos = after_crlf_pos;
                 for _ in 0..length {
-                    cursor_pos = try_incomplete!(self.check(src, cursor_pos, depth + 1));
+                    cursor_pos = try_incomplete!(Self::check(src, cursor_pos, depth + 1));
                 }
 
                 Ok(Some(cursor_pos))
@@ -168,7 +163,7 @@ impl RESPCodec {
     ///
     /// Assumes [`check`](Self::check) has validated the structure
     /// and depth. MUST NOT be called without a successful `check()`.
-    fn parse(&self, src: &mut BytesMut) -> RESPValue {
+    fn parse(src: &mut BytesMut) -> RESPValue {
         let data_tag = src[0];
         src.advance(1);
         match data_tag {
@@ -190,7 +185,7 @@ impl RESPCodec {
                 let length = parse_i64(src);
                 let mut values = Vec::with_capacity(length as usize);
                 for _ in 0..length {
-                    values.push(self.parse(src));
+                    values.push(Self::parse(src));
                 }
 
                 RESPValue::Array(values)
@@ -246,14 +241,14 @@ impl Decoder for RedisCommandCodec {
             })?;
         }
 
-        let end = try_incomplete!(self.check(src, 0));
+        let end = try_incomplete!(Self::check(src, 0));
 
         // Split the complete frame from `src` before parsing. This
         // ensures the buffer stays clean even if `parse` fails
         // partway through (e.g. unknown command), so the stream
         // can continue decoding subsequent commands.
         let mut frame = src.split_to(end);
-        Ok(Some(match self.parse(&mut frame) {
+        Ok(Some(match Self::parse(&mut frame) {
             Ok(command) => ClientMessage::Command(command),
             Err(err) => ClientMessage::Error(err),
         }))
@@ -267,7 +262,7 @@ impl RedisCommandCodec {
     /// Returns `Ok(Some(end))` where `src[pos..end]` is the
     /// complete deserialized command, `Ok(None)` if more data
     /// is needed, or `Err` on malformed input.
-    fn check(&self, src: &BytesMut, pos: usize) -> Result<Option<usize>, DecodeError> {
+    fn check(src: &BytesMut, pos: usize) -> Result<Option<usize>, DecodeError> {
         if pos >= src.len() {
             return Ok(None);
         }
@@ -290,7 +285,7 @@ impl RedisCommandCodec {
 
         let mut cursor_pos = after_crlf_pos;
         for _ in 0..length {
-            cursor_pos = try_incomplete!(self.check_part(src, cursor_pos));
+            cursor_pos = try_incomplete!(Self::check_part(src, cursor_pos));
         }
 
         Ok(Some(cursor_pos))
@@ -302,7 +297,7 @@ impl RedisCommandCodec {
     /// Returns `Ok(Some(end))` where `src[pos..end]` is the
     /// complete deserialized bulk string, `Ok(None)` if more
     /// data is needed, or `Err` on malformed input.
-    fn check_part(&self, src: &BytesMut, pos: usize) -> Result<Option<usize>, DecodeError> {
+    fn check_part(src: &BytesMut, pos: usize) -> Result<Option<usize>, DecodeError> {
         if pos >= src.len() {
             return Ok(None);
         }
@@ -337,7 +332,7 @@ impl RedisCommandCodec {
     /// Assumes [`check`](Self::check) has validated that the
     /// command is an array of bulk strings. MUST NOT be called
     /// without a successful `check()`.
-    fn parse(&self, src: &mut BytesMut) -> Result<RedisCommand, DecodeError> {
+    fn parse(src: &mut BytesMut) -> Result<RedisCommand, DecodeError> {
         debug_assert_eq!(src[0], b'*');
         src.advance(1);
 
@@ -347,11 +342,11 @@ impl RedisCommandCodec {
         let mut args = CommandArgumentStream::new(src, length);
         let command = args.next()?;
         if command.eq_ignore_ascii_case(b"GET") {
-            self.parse_get(args)
+            Self::parse_get(args)
         } else if command.eq_ignore_ascii_case(b"SET") {
-            self.parse_set(args)
+            Self::parse_set(args)
         } else if command.eq_ignore_ascii_case(b"PING") {
-            self.parse_ping(args)
+            Self::parse_ping(args)
         } else {
             Err(DecodeError::UnknownCommand { command })
         }
@@ -361,7 +356,7 @@ impl RedisCommandCodec {
     ///
     /// See [specification](https://redis.io/docs/latest/commands/get/)
     /// for more information.
-    fn parse_get(&self, mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
+    fn parse_get(mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
         let key = args.next()?;
         args.finish()?;
 
@@ -372,7 +367,7 @@ impl RedisCommandCodec {
     ///
     /// See [specification](https://redis.io/docs/latest/commands/set/)
     /// for more information.
-    fn parse_set(&self, mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
+    fn parse_set(mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
         let key = args.next()?;
         let value = args.next()?;
 
@@ -420,7 +415,7 @@ impl RedisCommandCodec {
     ///
     /// See [specification](https://redis.io/docs/latest/commands/ping/)
     /// for more information.
-    fn parse_ping(&self, args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
+    fn parse_ping(args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
         args.finish()?;
         Ok(RedisCommand::Connection(ConnectionCommand::Ping))
     }

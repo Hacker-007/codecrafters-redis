@@ -9,9 +9,9 @@ fn render_bytes(bytes: &[u8]) -> impl std::fmt::Display + use<'_> {
 
 #[derive(Debug, Error)]
 pub enum RESPError {
-    #[error("[resp - io] {0}")]
+    #[error("{0}")]
     IO(#[from] std::io::Error),
-    #[error("[resp - decode] {0}")]
+    #[error("{0}")]
     Decode(#[from] DecodeError),
 }
 
@@ -23,9 +23,9 @@ pub enum DecodeError {
     TooDeep { limit: usize },
     #[error("found unknown RESP data tag `{tag}`")]
     UnknownTag { tag: u8 },
-    #[error("found unknown command `{}`", render_bytes(&command))]
+    #[error("found unknown command `{}`", render_bytes(command))]
     UnknownCommand { command: Bytes },
-    #[error("found unknown command option `{}`", render_bytes(&option))]
+    #[error("found unknown command option `{}`", render_bytes(option))]
     UnknownCommandOption { option: Bytes },
     #[error("unable to parse `{}` as 64-bit signed integer", render_bytes(bytes))]
     BadInteger { bytes: Vec<u8> },

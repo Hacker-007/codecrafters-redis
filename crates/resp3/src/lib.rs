@@ -1,5 +1,6 @@
-use crate::{encoding::CommandPartEncoding, error::DecodeError};
 use bytes::Bytes;
+
+use crate::{encoding::CommandPartEncoding, error::DecodeError};
 
 pub mod codec;
 pub mod encoding;
@@ -84,6 +85,18 @@ impl CommandPartEncoding for RedisCommand {
             RedisCommand::Connection(command) => command.encode(dest),
             RedisCommand::String(command) => command.encode(dest),
         }
+    }
+}
+
+impl std::fmt::Display for RedisCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            RedisCommand::Connection(ConnectionCommand::Ping) => "PING",
+            RedisCommand::String(StringCommand::Get { .. }) => "GET",
+            RedisCommand::String(StringCommand::Set { .. }) => "SET",
+        };
+
+        write!(f, "{name}")
     }
 }
 

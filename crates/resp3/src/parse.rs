@@ -1,5 +1,6 @@
-use crate::error::DecodeError;
 use bytes::{Buf, Bytes, BytesMut};
+
+use crate::error::DecodeError;
 
 macro_rules! try_incomplete {
     ($e:expr) => {

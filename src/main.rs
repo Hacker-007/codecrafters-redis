@@ -1,10 +1,14 @@
-use crate::{error::RedisResult, server::RedisServer};
-use clap::Parser;
 use std::net::IpAddr;
+
+use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use crate::{error::RedisResult, server::RedisServer};
+
+mod client;
 mod error;
 mod server;
+mod store;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

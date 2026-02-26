@@ -1,12 +1,12 @@
-use crate::error::RedisResult;
-use futures::{SinkExt, StreamExt};
-use resp3::{
-    codec::{RESPCodec, RedisCommandCodec},
-    encoding, ClientMessage,
+use std::net::IpAddr;
+
+use tokio::{net::TcpListener, sync::mpsc};
+
+use crate::{
+    client::ClientConnection,
+    error::RedisResult,
+    store::{actor::RedisStoreActor, RedisStore},
 };
-use std::net::{IpAddr, SocketAddr};
-use tokio::net::{TcpListener, TcpStream};
-use tokio_util::codec::{FramedRead, FramedWrite};
 
 /// The server process that accepts incoming
 /// Redis commands and applies them to the
@@ -27,35 +27,22 @@ impl RedisServer {
     pub async fn start(&mut self) -> RedisResult<()> {
         let listener = TcpListener::bind((self.host, self.port)).await?;
         tracing::info!("server listening on {}:{}", self.host, self.port);
+
+        let (command_tx, command_rx) = mpsc::channel(32);
+        tokio::spawn(async move {
+            let store = RedisStore::default();
+            RedisStoreActor::new(store).run_forever(command_rx).await;
+        });
+
         loop {
             let (stream, client_address) = listener.accept().await?;
+            let command_tx = command_tx.clone();
             tokio::spawn(async move {
-                if let Err(error) = Self::client_loop(stream, client_address).await {
+                let client = ClientConnection::new(stream, client_address, command_tx);
+                if let Err(error) = client.run_forever().await {
                     tracing::error!("{error}");
                 }
-
-                tracing::info!("dropped connection from {client_address}")
             });
         }
-    }
-
-    /// Handles incoming client connections in a separate
-    /// Tokio task, establishes command forwarding to
-    /// store actor.
-    async fn client_loop(stream: TcpStream, client_address: SocketAddr) -> RedisResult<()> {
-        tracing::info!("accepted connection from {client_address}");
-        let (read_half, write_half) = stream.into_split();
-        let mut read_half = FramedRead::new(read_half, RedisCommandCodec);
-        let mut write_half = FramedWrite::new(write_half, RESPCodec);
-        while let Some(message) = read_half.next().await.transpose()? {
-            let response = match message {
-                ClientMessage::Command(_) => encoding::simple_string(&b"OK"[..]),
-                ClientMessage::Error(error) => encoding::simple_error(format!("ERR {error}")),
-            };
-
-            write_half.send(response).await?;
-        }
-
-        Ok(())
     }
 }

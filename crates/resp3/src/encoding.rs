@@ -1,6 +1,7 @@
-use crate::RESPValue;
 use bytes::{BufMut, Bytes, BytesMut};
 use itoa::Buffer;
+
+use crate::RESPValue;
 
 pub fn simple_string(bytes: impl Into<Bytes>) -> RESPValue {
     RESPValue::SimpleString(bytes.into())
