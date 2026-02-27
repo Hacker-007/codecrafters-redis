@@ -1,10 +1,13 @@
 use bytes::Bytes;
-use resp3::{encoding, ConnectionCommand, RESPValue, RedisCommand, StringCommand};
+use resp3::{
+    encoding, ConnectionCommand, RESPValue, RedisCommand, SetCondition, SetExpiration,
+    StringCommand,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    error::{RedisError, RedisResult},
-    store::RedisStore,
+    store::{RedisStore, StoreValue},
+    utils::digest,
 };
 
 #[derive(Debug)]
@@ -36,38 +39,83 @@ impl RedisStoreActor {
         Self { store }
     }
 
-    pub async fn run_forever(self, mut command_rx: mpsc::Receiver<StoreMessage>) {
+    pub async fn run_forever(mut self, mut command_rx: mpsc::Receiver<StoreMessage>) {
         while let Some(message) = command_rx.recv().await {
             tracing::info!("got command `{}`", message.command);
             let response = match message.command {
                 RedisCommand::Connection(ConnectionCommand::Ping) => self.handle_ping(),
                 RedisCommand::String(StringCommand::Get { key }) => self.handle_get(key),
-                command => Err(RedisError::UnsupportedCommand {
-                    command: format!("{command}"),
-                }),
+                RedisCommand::String(StringCommand::Set {
+                    key,
+                    value,
+                    condition,
+                    get,
+                    expiration,
+                }) => self.handle_set(key, value, condition, get, expiration),
             };
 
             // If the receiving end of this channel is closed, then
             // this actor is complete.
-            let is_complete = message
-                .response_tx
-                .send(response.unwrap_or_else(Into::into))
-                .is_err();
-
-            if is_complete {
+            if message.response_tx.send(response).is_err() {
                 break;
             }
         }
     }
 
-    fn handle_ping(&self) -> RedisResult<RESPValue> {
-        Ok(encoding::simple_string("PONG"))
+    fn handle_ping(&self) -> RESPValue {
+        encoding::simple_string("PONG")
     }
 
-    fn handle_get(&self, key: Bytes) -> RedisResult<RESPValue> {
+    fn handle_get(&mut self, key: Bytes) -> RESPValue {
         self.store
             .get(&key)
             .map(Into::into)
-            .ok_or_else(|| RedisError::KeyNotFound { key })
+            .unwrap_or_else(|| encoding::null())
+    }
+
+    fn handle_set(
+        &mut self,
+        key: Bytes,
+        value: Bytes,
+        condition: Option<SetCondition>,
+        get: bool,
+        expiration: Option<SetExpiration>,
+    ) -> RESPValue {
+        let previous = self.store.get(&key).map(StoreValue::as_string).flatten();
+        let should_set = match condition {
+            None => true,
+            Some(SetCondition::Nx) => previous.is_none(),
+            Some(SetCondition::Xx) => previous.is_some(),
+            Some(SetCondition::IfEq(expected)) => previous == Some(expected),
+            Some(SetCondition::IfNe(expected)) => previous != Some(expected),
+            Some(SetCondition::IfDeq(expected)) => {
+                previous.as_deref().map(digest) == Some(expected)
+            }
+            Some(SetCondition::IfDne(expected)) => {
+                previous.as_deref().map(digest) != Some(expected)
+            }
+        };
+
+        if should_set {
+            self.store.insert(key.clone(), StoreValue::String(value));
+            match expiration {
+                None => self.store.remove_expiration(&key),
+                Some(SetExpiration::KeepTtl) => {}
+                Some(exp) => {
+                    let timestamp = exp.resolve().expect("`KEEPTTL` is checked separately");
+                    self.store.set_expiration(key, timestamp);
+                }
+            }
+        }
+
+        if get {
+            previous
+                .map(encoding::bulk_string)
+                .unwrap_or(encoding::null())
+        } else if should_set {
+            encoding::simple_string("OK")
+        } else {
+            encoding::null()
+        }
     }
 }

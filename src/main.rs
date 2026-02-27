@@ -9,6 +9,7 @@ mod client;
 mod error;
 mod server;
 mod store;
+mod utils;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

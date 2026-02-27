@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use bytes::Bytes;
 
 use crate::{encoding::CommandPartEncoding, error::DecodeError};
@@ -123,13 +125,31 @@ impl CommandPartEncoding for SetCondition {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetExpiration {
     Ex(i64),
     Px(i64),
     ExAt(i64),
     PxAt(i64),
     KeepTtl,
+}
+
+impl SetExpiration {
+    /// Resolves this expiration as an [`SystemTime`] using
+    /// the "now" time as the reference point.
+    /// 
+    /// Since [`SetExpiration::KeepTtl`] has no logical resolution
+    /// time, `None` is returned.
+    pub fn resolve(self) -> Option<SystemTime> {
+        let now = SystemTime::now();
+        match self {
+            SetExpiration::Ex(secs) => Some(now + Duration::from_secs(secs as u64)),
+            SetExpiration::Px(millis) => Some(now + Duration::from_millis(millis as u64)),
+            SetExpiration::ExAt(ts) => Some(UNIX_EPOCH + Duration::from_secs(ts as u64)),
+            SetExpiration::PxAt(ts) => Some(UNIX_EPOCH + Duration::from_millis(ts as u64)),
+            SetExpiration::KeepTtl => return None,
+        }
+    }
 }
 
 impl CommandPartEncoding for SetExpiration {
