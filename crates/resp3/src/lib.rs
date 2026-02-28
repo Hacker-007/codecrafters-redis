@@ -54,6 +54,10 @@ pub enum StringCommand {
         get: bool,
         expiration: Option<SetExpiration>,
     },
+    Append {
+        key: Bytes,
+        value: Bytes,
+    },
 }
 
 impl CommandPartEncoding for StringCommand {
@@ -71,6 +75,7 @@ impl CommandPartEncoding for StringCommand {
                 get.then(|| "GET".encode(dest));
                 expiration.encode(dest);
             }
+            StringCommand::Append { key, value } => ("APPEND", key, value).encode(dest),
         }
     }
 }
@@ -87,18 +92,6 @@ impl CommandPartEncoding for RedisCommand {
             RedisCommand::Connection(command) => command.encode(dest),
             RedisCommand::String(command) => command.encode(dest),
         }
-    }
-}
-
-impl std::fmt::Display for RedisCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            RedisCommand::Connection(ConnectionCommand::Ping) => "PING",
-            RedisCommand::String(StringCommand::Get { .. }) => "GET",
-            RedisCommand::String(StringCommand::Set { .. }) => "SET",
-        };
-
-        write!(f, "{name}")
     }
 }
 
@@ -137,7 +130,7 @@ pub enum SetExpiration {
 impl SetExpiration {
     /// Resolves this expiration as an [`SystemTime`] using
     /// the "now" time as the reference point.
-    /// 
+    ///
     /// Since [`SetExpiration::KeepTtl`] has no logical resolution
     /// time, `None` is returned.
     pub fn resolve(self) -> Option<SystemTime> {
@@ -147,7 +140,7 @@ impl SetExpiration {
             SetExpiration::Px(millis) => Some(now + Duration::from_millis(millis as u64)),
             SetExpiration::ExAt(ts) => Some(UNIX_EPOCH + Duration::from_secs(ts as u64)),
             SetExpiration::PxAt(ts) => Some(UNIX_EPOCH + Duration::from_millis(ts as u64)),
-            SetExpiration::KeepTtl => return None,
+            SetExpiration::KeepTtl => None,
         }
     }
 }

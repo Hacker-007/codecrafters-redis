@@ -345,6 +345,8 @@ impl RedisCommandCodec {
             Self::parse_get(args)
         } else if command.eq_ignore_ascii_case(b"SET") {
             Self::parse_set(args)
+        } else if command.eq_ignore_ascii_case(b"APPEND") {
+            Self::parse_append(args)
         } else if command.eq_ignore_ascii_case(b"PING") {
             Self::parse_ping(args)
         } else {
@@ -358,8 +360,8 @@ impl RedisCommandCodec {
     /// for more information.
     fn parse_get(mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
         let key = args.next()?;
-        args.finish()?;
 
+        args.finish()?;
         Ok(RedisCommand::String(StringCommand::Get { key }))
     }
 
@@ -409,6 +411,18 @@ impl RedisCommandCodec {
             get: get.into_inner(),
             expiration: expiration.into_inner(),
         }))
+    }
+
+    /// Parses a `APPEND` command.
+    ///
+    /// See [specification](https://redis.io/docs/latest/commands/append/)
+    /// for more information.
+    fn parse_append(mut args: CommandArgumentStream<'_>) -> Result<RedisCommand, DecodeError> {
+        let key = args.next()?;
+        let value = args.next()?;
+
+        args.finish()?;
+        Ok(RedisCommand::String(StringCommand::Append { key, value }))
     }
 
     /// Parses a `PING` command.

@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use resp3::{
     encoding, ConnectionCommand, RESPValue, RedisCommand, SetCondition, SetExpiration,
     StringCommand,
@@ -6,6 +6,7 @@ use resp3::{
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    error::{RedisError, RedisResult},
     store::{RedisStore, StoreValue},
     utils::digest,
 };
@@ -13,11 +14,14 @@ use crate::{
 #[derive(Debug)]
 pub struct StoreMessage {
     command: RedisCommand,
-    response_tx: oneshot::Sender<RESPValue>,
+    response_tx: oneshot::Sender<RedisResult<RESPValue>>,
 }
 
 impl StoreMessage {
-    pub fn new(command: RedisCommand, response_tx: oneshot::Sender<RESPValue>) -> Self {
+    pub fn new(
+        command: RedisCommand,
+        response_tx: oneshot::Sender<RedisResult<RESPValue>>,
+    ) -> Self {
         Self {
             command,
             response_tx,
@@ -41,17 +45,19 @@ impl RedisStoreActor {
 
     pub async fn run_forever(mut self, mut command_rx: mpsc::Receiver<StoreMessage>) {
         while let Some(message) = command_rx.recv().await {
-            tracing::info!("got command `{}`", message.command);
             let response = match message.command {
-                RedisCommand::Connection(ConnectionCommand::Ping) => self.handle_ping(),
-                RedisCommand::String(StringCommand::Get { key }) => self.handle_get(key),
+                RedisCommand::Connection(ConnectionCommand::Ping) => Ok(self.handle_ping()),
+                RedisCommand::String(StringCommand::Get { key }) => Ok(self.handle_get(key)),
                 RedisCommand::String(StringCommand::Set {
                     key,
                     value,
                     condition,
                     get,
                     expiration,
-                }) => self.handle_set(key, value, condition, get, expiration),
+                }) => Ok(self.handle_set(key, value, condition, get, expiration)),
+                RedisCommand::String(StringCommand::Append { key, value }) => {
+                    self.handle_append(key, value)
+                }
             };
 
             // If the receiving end of this channel is closed, then
@@ -70,7 +76,7 @@ impl RedisStoreActor {
         self.store
             .get(&key)
             .map(Into::into)
-            .unwrap_or_else(|| encoding::null())
+            .unwrap_or_else(encoding::null)
     }
 
     fn handle_set(
@@ -81,7 +87,7 @@ impl RedisStoreActor {
         get: bool,
         expiration: Option<SetExpiration>,
     ) -> RESPValue {
-        let previous = self.store.get(&key).map(StoreValue::as_string).flatten();
+        let previous = self.store.get(&key).and_then(StoreValue::as_string);
         let should_set = match condition {
             None => true,
             Some(SetCondition::Nx) => previous.is_none(),
@@ -102,7 +108,10 @@ impl RedisStoreActor {
                 None => self.store.remove_expiration(&key),
                 Some(SetExpiration::KeepTtl) => {}
                 Some(exp) => {
-                    let timestamp = exp.resolve().expect("`KEEPTTL` is checked separately");
+                    let timestamp = exp
+                        .resolve()
+                        .expect("`KEEPTTL` should be checked separately");
+
                     self.store.set_expiration(key, timestamp);
                 }
             }
@@ -117,5 +126,23 @@ impl RedisStoreActor {
         } else {
             encoding::null()
         }
+    }
+
+    fn handle_append(&mut self, key: Bytes, value: Bytes) -> RedisResult<RESPValue> {
+        let appended = match self.store.get(&key).and_then(StoreValue::as_string) {
+            Some(previous) => {
+                let mut buffer = BytesMut::with_capacity(previous.len() + value.len());
+                buffer.put(previous);
+                buffer.put(value);
+                buffer.freeze()
+            }
+            None => value,
+        };
+
+        let length = appended.len();
+        self.store.insert(key, StoreValue::String(appended));
+        i64::try_from(length)
+            .map(encoding::integer)
+            .map_err(|_| RedisError::LengthTooLarge)
     }
 }

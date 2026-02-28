@@ -61,7 +61,10 @@ impl ClientConnection {
                         .await
                         .map_err(|_| RedisError::Unknown)?;
 
-                    response_rx.await.map_err(|_| RedisError::Unknown)?
+                    response_rx
+                        .await
+                        .map_err(|_| RedisError::Unknown)?
+                        .unwrap_or_else(|error| encoding::simple_error(format!("ERR {error}")))
                 }
                 ClientMessage::Error(error) => encoding::simple_error(format!("ERR {error}")),
             };

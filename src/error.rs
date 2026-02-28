@@ -10,6 +10,9 @@ pub enum RedisError {
     #[error(transparent)]
     Resp(#[from] RESPError),
 
+    #[error("length is larger than 64-bit integer")]
+    LengthTooLarge,
+
     #[error("an unknown error occurred")]
     Unknown,
 }
