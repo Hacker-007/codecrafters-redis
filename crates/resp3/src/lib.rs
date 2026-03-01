@@ -2,12 +2,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use crate::{encoding::CommandPartEncoding, error::DecodeError};
+use crate::{encoding::CommandEncoding, error::DecodeError};
 
 pub mod codec;
 pub mod encoding;
 pub mod error;
 mod parse;
+pub mod pretty;
 
 /// A RESP3-compliant value.
 ///
@@ -34,7 +35,7 @@ pub enum ConnectionCommand {
     Ping,
 }
 
-impl CommandPartEncoding for ConnectionCommand {
+impl CommandEncoding for ConnectionCommand {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
             ConnectionCommand::Ping => "PING".encode(dest),
@@ -60,7 +61,7 @@ pub enum StringCommand {
     },
 }
 
-impl CommandPartEncoding for StringCommand {
+impl CommandEncoding for StringCommand {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
             StringCommand::Get { key } => ("GET", key).encode(dest),
@@ -86,7 +87,7 @@ pub enum RedisCommand {
     String(StringCommand),
 }
 
-impl CommandPartEncoding for RedisCommand {
+impl CommandEncoding for RedisCommand {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
             RedisCommand::Connection(command) => command.encode(dest),
@@ -105,7 +106,7 @@ pub enum SetCondition {
     IfDne(Bytes),
 }
 
-impl CommandPartEncoding for SetCondition {
+impl CommandEncoding for SetCondition {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
             SetCondition::Nx => "NX".encode(dest),
@@ -145,7 +146,7 @@ impl SetExpiration {
     }
 }
 
-impl CommandPartEncoding for SetExpiration {
+impl CommandEncoding for SetExpiration {
     fn encode(self, dest: &mut Vec<Bytes>) {
         match self {
             SetExpiration::Ex(seconds) => ("EX", seconds).encode(dest),

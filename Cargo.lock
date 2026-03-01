@@ -485,6 +485,7 @@ dependencies = [
  "itoa",
  "memchr",
  "thiserror",
+ "tokio",
  "tokio-util",
 ]
 

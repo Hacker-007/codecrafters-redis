@@ -3,7 +3,7 @@ use itoa::Buffer;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
-    encoding::CommandPartEncoding,
+    encoding::CommandEncoding,
     error::{DecodeError, RESPError},
     parse::{
         check_i64, find_crlf, parse_i64, parse_line, try_incomplete, try_optional, BoolSlot,
@@ -59,13 +59,13 @@ impl Encoder<RESPValue> for RESPCodec {
                 dest.put(bytes);
                 dest.extend_from_slice(b"\r\n");
             }
-            RESPValue::Array(values) => {
+            RESPValue::Array(elements) => {
                 let mut buf = Buffer::new();
-                let length = buf.format(values.len());
+                let length = buf.format(elements.len());
                 dest.put_u8(b'*');
                 dest.extend_from_slice(length.as_bytes());
                 dest.extend_from_slice(b"\r\n");
-                for value in values {
+                for value in elements {
                     self.encode(value, dest)?;
                 }
             }
@@ -183,12 +183,12 @@ impl RESPCodec {
             }
             b'*' => {
                 let length = parse_i64(src);
-                let mut values = Vec::with_capacity(length as usize);
+                let mut elements = Vec::with_capacity(length as usize);
                 for _ in 0..length {
-                    values.push(Self::parse(src));
+                    elements.push(Self::parse(src));
                 }
 
-                RESPValue::Array(values)
+                RESPValue::Array(elements)
             }
             _ => unreachable!(),
         }
