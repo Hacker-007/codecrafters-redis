@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use tokio::net::{TcpListener, UnixListener};
 use tracing_subscriber::EnvFilter;
 
 use crate::{error::RedisResult, server::RedisServer};
@@ -14,13 +15,27 @@ mod utils;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct CLIArguments {
-    /// The host to bind to.
-    #[arg(long, default_value = "127.0.0.1")]
-    host: IpAddr,
+    #[command(subcommand)]
+    mode: ServerMode,
+}
 
-    /// The port to bind to.
-    #[arg(long, default_value_t = 6379)]
-    port: u16,
+#[derive(Debug, Subcommand)]
+enum ServerMode {
+    Tcp {
+        /// The host to bind to.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: IpAddr,
+
+        /// The port to bind to.
+        #[arg(long, default_value_t = 6379)]
+        port: u16,
+    },
+    Socket {
+        /// The path of the Unix domain socket
+        /// file descriptor.
+        #[arg(long)]
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -34,6 +49,16 @@ async fn main() -> RedisResult<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let mut server = RedisServer::new(args.host, args.port);
-    server.start().await
+    match args.mode {
+        ServerMode::Tcp { host, port } => {
+            let listener = TcpListener::bind((host, port)).await?;
+            tracing::info!("server listening on {host}:{port}");
+            RedisServer::new(listener).start().await
+        }
+        ServerMode::Socket { path } => {
+            let listener = UnixListener::bind(&path)?;
+            tracing::info!("server listening on {}", path);
+            RedisServer::new(listener).start().await
+        }
+    }
 }
