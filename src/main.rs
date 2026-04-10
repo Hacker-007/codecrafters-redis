@@ -56,6 +56,9 @@ async fn main() -> RedisResult<()> {
             RedisServer::new(listener).start().await
         }
         ServerMode::Socket { path } => {
+            if std::path::Path::new(&path).exists() {
+                std::fs::remove_file(&path)?;
+            }
             let listener = UnixListener::bind(&path)?;
             tracing::info!("server listening on {}", path);
             RedisServer::new(listener).start().await
